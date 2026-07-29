@@ -4,11 +4,22 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="54dc6900-d217-49f8-8385-197badefa1a2" name="Changes" comment="" />
+    <list default="true" id="54dc6900-d217-49f8-8385-197badefa1a2" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/../EVchargingplatform/.gitignore" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../EVchargingplatform/.idea/.gitignore" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../EVchargingplatform/.idea/misc.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../EVchargingplatform/.idea/vcs.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../EVchargingplatform/.idea/workspace.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../EVchargingplatform/pom.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../EVchargingplatform/src/main/java/org/evchargingplatform/Main.java" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
     <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$/../EVchargingplatform" />
   </component>
   <component name="ProjectColorInfo"><![CDATA[{
   "associatedIndex": 3
@@ -23,7 +34,9 @@
   "keyToString": {
     "ModuleVcsDetector.initialDetectionPerformed": "true",
     "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
     "com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1": "true",
+    "git-widget-placeholder": "master",
     "junie.onboarding.icon.badge.shown": "true",
     "kotlin-language-version-configured": "true",
     "onboarding.tips.debug.path": "E:/Java proj/EV charging platform/EVchargingplatform/src/main/java/org/evchargingplatform/Main.java",
