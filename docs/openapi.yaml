@@ -1,0 +1,267 @@
+openapi: 3.0.3
+info:
+  title: EV Charging Network Platform API
+  version: 1.0.0
+servers:
+  - url: /api
+paths:
+  /stations:
+    post:
+      summary: Create a station
+      operationId: createStation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStationRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StationResponse'
+    get:
+      summary: List stations
+      operationId: listStations
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StationResponse'
+  /stations/{id}:
+    get:
+      summary: Get a station
+      operationId: getStation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StationResponse'
+  /reservations:
+    post:
+      summary: Create a reservation
+      operationId: createReservation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReservationRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationResponse'
+  /reservations/{id}:
+    get:
+      summary: Get a reservation
+      operationId: getReservation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationResponse'
+  /charging/start:
+    post:
+      summary: Start charging
+      operationId: startCharging
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartChargingRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChargingSessionResponse'
+  /charging/stop:
+    post:
+      summary: Stop charging
+      operationId: stopCharging
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StopChargingRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChargingSessionResponse'
+  /sessions/{id}:
+    get:
+      summary: Get charging session
+      operationId: getSession
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChargingSessionResponse'
+components:
+  schemas:
+    CreateStationRequest:
+      type: object
+      required: [externalRef, name, countryCode, latitude, longitude]
+      properties:
+        externalRef:
+          type: string
+        name:
+          type: string
+        countryCode:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+    StationResponse:
+      type: object
+      properties:
+        stationId:
+          type: string
+          format: uuid
+        externalRef:
+          type: string
+        name:
+          type: string
+        countryCode:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        status:
+          type: string
+    CreateReservationRequest:
+      type: object
+      required: [stationId, connectorId, userId, expiresAt]
+      properties:
+        stationId:
+          type: string
+          format: uuid
+        connectorId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        expiresAt:
+          type: string
+          format: date-time
+    ReservationResponse:
+      type: object
+      properties:
+        reservationId:
+          type: string
+          format: uuid
+        stationId:
+          type: string
+          format: uuid
+        connectorId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        status:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+    StartChargingRequest:
+      type: object
+      required: [stationId, connectorId, userId]
+      properties:
+        stationId:
+          type: string
+          format: uuid
+        connectorId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        reservationId:
+          type: string
+          format: uuid
+    StopChargingRequest:
+      type: object
+      required: [sessionId]
+      properties:
+        sessionId:
+          type: string
+          format: uuid
+        meterReadingKwh:
+          type: number
+          format: double
+    ChargingSessionResponse:
+      type: object
+      properties:
+        sessionId:
+          type: string
+          format: uuid
+        stationId:
+          type: string
+          format: uuid
+        connectorId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        status:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        stoppedAt:
+          type: string
+          format: date-time
+        totalEnergyKwh:
+          type: number
+          format: double
