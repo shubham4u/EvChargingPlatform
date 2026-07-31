@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.net.URI;
+import java.util.NoSuchElementException;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
@@ -26,6 +27,15 @@ public class ApiExceptionHandler {
     ProblemDetail handleValidation(MethodArgumentNotValidException exception) {
         return problem(HttpStatus.BAD_REQUEST, "Validation failed", "Request contains invalid fields");
     }
+
+    @ExceptionHandler(NoSuchElementException.class)
+    ProblemDetail handleMissing(NoSuchElementException exception) { return problem(HttpStatus.NOT_FOUND, "Resource not found", exception.getMessage()); }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    ProblemDetail handleBadRequest(IllegalArgumentException exception) { return problem(HttpStatus.BAD_REQUEST, "Invalid request", exception.getMessage()); }
+
+    @ExceptionHandler(IllegalStateException.class)
+    ProblemDetail handleConflict(IllegalStateException exception) { return problem(HttpStatus.CONFLICT, "Invalid reservation state", exception.getMessage()); }
 
     private ProblemDetail problem(HttpStatus status, String title, String detail) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
