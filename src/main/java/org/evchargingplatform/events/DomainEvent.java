@@ -13,5 +13,8 @@ public interface DomainEvent {
     UUID causationId();
 
     Instant occurredAt();
-}
 
+    default String aggregateType() { return "unknown"; }
+
+    default UUID aggregateId() { return null; }
+}
