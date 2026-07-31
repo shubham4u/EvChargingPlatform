@@ -22,6 +22,8 @@ public class ReservationEntity {
     ReservationStatus status;
     Instant createdAt;
     Instant updatedAt;
+    @Version
+    long version;
 
     public ReservationEntity() {
     }

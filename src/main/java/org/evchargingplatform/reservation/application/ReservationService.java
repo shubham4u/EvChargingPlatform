@@ -2,8 +2,7 @@ package org.evchargingplatform.reservation.application;
 
 import org.evchargingplatform.reservation.domain.Reservation;
 import org.evchargingplatform.reservation.domain.ReservationStatus;
-import org.evchargingplatform.reservation.infrastructure.persistence.ReservationEntity;
-import org.evchargingplatform.reservation.infrastructure.persistence.ReservationJpaRepository;
+import org.evchargingplatform.reservation.domain.repository.ReservationRepository;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,10 +11,10 @@ import java.util.*;
 
 @Service
 public class ReservationService {
-    private final ReservationJpaRepository repo;
+    private final ReservationRepository repo;
     private final Clock clock = Clock.systemUTC();
 
-    public ReservationService(ReservationJpaRepository r) {
+    public ReservationService(ReservationRepository r) {
         repo = r;
     }
 
@@ -36,31 +35,22 @@ public class ReservationService {
 
     @Transactional(readOnly = true)
     public Reservation get(UUID id) {
-        return toDomain(
-                repo.findById(id).orElseThrow(() -> new NoSuchElementException("Reservation not found: " + id)));
+        return repo.findById(id).orElseThrow(() -> new NoSuchElementException("Reservation not found: " + id));
     }
 
     @Transactional(readOnly = true)
     public List<Reservation> all() {
-        return repo.findAll().stream().map(this::toDomain).toList();
+        return repo.findAll();
     }
 
     @Scheduled(fixedDelayString = "${reservation.expiration.poll-ms:60000}")
     @Transactional
     public void expireReservations() {
-        repo.findByStatusInAndExpirationTimeBefore(List.of(ReservationStatus.CREATED, ReservationStatus.ACTIVE),
-                Instant.now(clock)).forEach(e -> save(toDomain(e).expire(clock)));
+        repo.findExpired(List.of(ReservationStatus.CREATED, ReservationStatus.ACTIVE), Instant.now(clock))
+                .forEach(e -> save(e.expire(clock)));
     }
 
     private Reservation save(Reservation r) {
-        return toDomain(
-                repo.save(new ReservationEntity(r.id(), r.reservationNumber(), r.stationId(), r.chargerId(), r.userId(),
-                        r.vehicleId(), r.startTime(), r.expirationTime(), r.status(), r.createdAt(), r.updatedAt())));
-    }
-
-    private Reservation toDomain(ReservationEntity e) {
-        return new Reservation(e.getId(), e.getReservationNumber(), e.getStationId(), e.getChargerId(), e.getUserId(),
-                e.getVehicleId(), e.getStartTime(), e.getExpirationTime(), e.getStatus(), e.getCreatedAt(),
-                e.getUpdatedAt());
+        return repo.save(r);
     }
 }
