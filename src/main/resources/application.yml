@@ -27,6 +27,13 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: ${KAFKA_PRODUCER_ACKS:all}
+      retries: ${KAFKA_PRODUCER_RETRIES:5}
+      properties:
+        enable.idempotence: ${KAFKA_PRODUCER_IDEMPOTENCE:true}
+        compression.type: ${KAFKA_PRODUCER_COMPRESSION:lz4}
+        batch.size: ${KAFKA_PRODUCER_BATCH_SIZE:16384}
+        linger.ms: ${KAFKA_PRODUCER_LINGER_MS:5}
 
 app:
   messaging:
