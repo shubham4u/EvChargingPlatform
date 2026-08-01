@@ -32,6 +32,7 @@ app:
   messaging:
     enabled: ${KAFKA_ENABLED:false}
     station-topic: ${STATION_EVENTS_TOPIC:station.events.v1}
+    reservation-topic: ${RESERVATION_EVENTS_TOPIC:reservation.events.v1}
 
 management:
   endpoints:
