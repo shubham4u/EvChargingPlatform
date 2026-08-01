@@ -34,12 +34,20 @@ spring:
         compression.type: ${KAFKA_PRODUCER_COMPRESSION:lz4}
         batch.size: ${KAFKA_PRODUCER_BATCH_SIZE:16384}
         linger.ms: ${KAFKA_PRODUCER_LINGER_MS:5}
+    consumer:
+      group-id: ${KAFKA_CONSUMER_GROUP:station-service}
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      auto-offset-reset: earliest
+      properties:
+        spring.json.trusted.packages: "org.evchargingplatform.events.*"
 
 app:
   messaging:
     enabled: ${KAFKA_ENABLED:false}
     station-topic: ${STATION_EVENTS_TOPIC:station.events.v1}
     reservation-topic: ${RESERVATION_EVENTS_TOPIC:reservation.events.v1}
+    consumer-group: ${KAFKA_CONSUMER_GROUP:station-service}
 
 management:
   endpoints:
