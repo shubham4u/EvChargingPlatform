@@ -1,11 +1,12 @@
 package org.evchargingplatform.reservation.domain;
 
+import java.io.Serializable;
 import java.time.*;
 import java.util.UUID;
 
 public record Reservation(UUID id, String reservationNumber, UUID stationId, UUID chargerId,
         UUID userId, UUID vehicleId, Instant startTime, Instant expirationTime,
-        ReservationStatus status, Instant createdAt, Instant updatedAt) {
+        ReservationStatus status, Instant createdAt, Instant updatedAt) implements Serializable {
     public static Reservation create(UUID stationId, UUID chargerId, UUID userId, UUID vehicleId, Instant start,
             Clock clock) {
         Instant now = Instant.now(clock);

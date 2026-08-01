@@ -39,16 +39,7 @@ app:
   messaging:
     enabled: ${KAFKA_ENABLED:false}
     station-topic: ${STATION_EVENTS_TOPIC:station.events.v1}
-  kafka:
-    station-topic: ${STATION_EVENTS_TOPIC:station.events}
-    charger-topic: ${CHARGER_EVENTS_TOPIC:charger.events}
-    telemetry-topic: ${TELEMETRY_EVENTS_TOPIC:telemetry.events}
-    retries: ${KAFKA_PRODUCER_RETRIES:5}
-    acks: ${KAFKA_PRODUCER_ACKS:all}
-    idempotence: ${KAFKA_PRODUCER_IDEMPOTENCE:true}
-    compression-type: ${KAFKA_PRODUCER_COMPRESSION:lz4}
-    batch-size: ${KAFKA_PRODUCER_BATCH_SIZE:16384}
-    linger-ms: ${KAFKA_PRODUCER_LINGER_MS:5}
+    reservation-topic: ${RESERVATION_EVENTS_TOPIC:reservation.events.v1}
 
 management:
   endpoints:
