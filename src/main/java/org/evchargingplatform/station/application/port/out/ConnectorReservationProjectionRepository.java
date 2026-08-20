@@ -22,4 +22,5 @@ public interface ConnectorReservationProjectionRepository {
             ConnectorReservationProjection.ReservationProjectionStatus status);
 
     boolean existsByReservationId(UUID reservationId);
+
 }

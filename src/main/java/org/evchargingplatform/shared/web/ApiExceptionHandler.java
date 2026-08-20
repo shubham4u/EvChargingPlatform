@@ -1,5 +1,7 @@
 package org.evchargingplatform.shared.web;
 
+import org.evchargingplatform.charging.domain.exception.ChargingSessionNotFoundException;
+import org.evchargingplatform.charging.domain.exception.ConnectorNotReservedException;
 import org.evchargingplatform.reservation.domain.exception.ConnectorAlreadyReservedException;
 import org.evchargingplatform.reservation.domain.exception.ReservationAlreadyCancelledException;
 import org.evchargingplatform.reservation.domain.exception.ReservationAlreadyConfirmedException;
@@ -58,6 +60,17 @@ public class ApiExceptionHandler {
         return problem(HttpStatus.CONFLICT, "Connector already reserved", exception.getMessage());
     }
 
+    // --- Charging session exceptions ---
+
+    @ExceptionHandler(ChargingSessionNotFoundException.class)
+    ProblemDetail handleChargingSessionNotFound(ChargingSessionNotFoundException exception) {
+        return problem(HttpStatus.NOT_FOUND, "Charging session not found", exception.getMessage());
+    }
+
+    @ExceptionHandler(ConnectorNotReservedException.class)
+    ProblemDetail handleConnectorNotReserved(ConnectorNotReservedException exception) {
+        return problem(HttpStatus.CONFLICT, "Connector not reserved", exception.getMessage());
+    }
     // --- Generic exceptions ---
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
