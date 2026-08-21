@@ -64,6 +64,7 @@ sequenceDiagram
 - Deserializes JSON events into typed Java records
 - Delegates to the `ReservationEventConsumer` port
 - Gated by `@ConditionalOnProperty(name = "app.messaging.enabled", havingValue = "true")`
+- Registers a single consumer for the topic/group and dispatches each of the four event types via `@KafkaHandler` methods (see [Bug Fix — Kafka Listener Type Dispatch](#bug-fix--kafka-listener-type-dispatch) below)
 
 ### Projection Application Service
 
@@ -169,6 +170,28 @@ Received ReservationCancelledEvent
 Connector ... marked as RELEASED
 ```
 
+## Bug Fix — Kafka Listener Type Dispatch
+
+The original implementation annotated all four handler methods (`onReservationCreated`, `onReservationCancelled`, `onReservationCompleted`, `onReservationExpired`) with their own `@KafkaListener(topics = ..., groupId = "station-service")`. That registers **four independent consumers in the same consumer group on the same topic**, so Kafka splits the topic's partitions across them. A given event lands on whichever of the four listeners owns that partition, not on the listener whose method signature matches the event's type — so most events arrived at a listener expecting a different record type and failed to deserialize/convert.
+
+**Fix:** moved `@KafkaListener(topics = ..., groupId = "station-service")` to the class level, and changed each handler method to `@KafkaHandler`. This registers exactly one consumer for the topic/group; Spring Kafka's `JsonDeserializer` resolves the concrete event type from the `__TypeId__` header the producer's `JsonSerializer` already adds, and routes the deserialized payload to the `@KafkaHandler` method whose parameter type matches. No changes were needed to the producer, the event records, or `application.yml` — `spring.json.trusted.packages` was already configured correctly.
+
+Changed file: `src/main/java/org/evchargingplatform/station/adapter/in/messaging/KafkaReservationEventConsumer.java`.
+
+## End-to-End Verification
+
+After the fix, the flow was verified against the real stack rather than only unit tests:
+
+1. `mvn -o compile` and `mvn -o test` — build succeeds, all 49 tests pass (no test changes were needed; `StationProjectionServiceTest` calls the application service directly and doesn't exercise the listener wiring, so it couldn't have caught this bug).
+2. `docker compose up --build -d` — full stack (Postgres, Redis, Kafka, Jaeger, station-service) built and started with `KAFKA_ENABLED=true`.
+3. `POST /reservations` — created a reservation, which published `ReservationCreatedEvent`. Confirmed via `psql` that `connector_reservation_projections` got a `RESERVED` row, and via `docker compose logs` that `KafkaReservationEventConsumer` logged `Received ReservationCreatedEvent`.
+4. `PATCH /reservations/{id}/cancel` — published `ReservationCancelledEvent`. Confirmed the same projection row transitioned to `RELEASED`, and the log showed `Received ReservationCancelledEvent` handled by the same listener container thread (`container#0-0-C-1`) that handled the created event — proving a single consumer now correctly dispatches both event types by type, which is exactly the scenario the bug broke.
+5. `docker compose down` — stack torn down after verification.
+
+`onReservationCompleted` and `onReservationExpired` were not separately exercised end-to-end in this pass — there is no `activate` REST endpoint to move a reservation to `ACTIVE` first, so `PATCH /reservations/{id}/complete` isn't currently reachable from a freshly created reservation, and expiry requires waiting out the scheduler's poll interval. Both handlers use the identical `@KafkaHandler` dispatch mechanism and structurally identical event records as the two verified above, so they carry no additional risk from this fix, but a full lifecycle demo is still open work.
+
+Fix committed as `bb19015` on `feature/sprint-4-event-consumption` and pushed to origin.
+
 ## Sprint 4 boundaries
 
 - ✅ Station Service consumes reservation events asynchronously
@@ -176,3 +199,6 @@ Connector ... marked as RELEASED
 - ✅ Reservation bounded context remains fully isolated
 - ✅ Projection is a local read-model, not a replication of reservation state
 - ✅ Consumer is idempotent and handles redelivery gracefully
+- ✅ Kafka listener dispatches all four reservation event types correctly from a single consumer (post-implementation bug fix, see above)
+- ✅ Fix verified end-to-end against the real Docker Compose stack, not just unit tests
+- ⬜ `onReservationCompleted` / `onReservationExpired` not yet exercised end-to-end (no `activate` endpoint; expiry needs a longer-running manual test)
