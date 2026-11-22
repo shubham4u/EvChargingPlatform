@@ -55,7 +55,13 @@ public class ReservationJpaAdapter implements ReservationRepository {
         return new ReservationEntity(
                 r.id(), r.reservationNumber(), r.stationId(), r.chargerId(),
                 r.userId(), r.vehicleId(), r.startTime(), r.expirationTime(),
-                r.status(), r.createdAt(), r.updatedAt());
+                r.status(), r.createdAt(), r.updatedAt(), currentVersion(r.id()));
+    }
+
+    // The domain record carries no version, so reuse the persisted one. Rebuilding the entity
+    // with version 0 makes Hibernate reject every update after the first as a stale write.
+    private long currentVersion(UUID id) {
+        return repository.findById(id).map(ReservationEntity::getVersion).orElse(0L);
     }
 
     private Reservation toDomain(ReservationEntity e) {

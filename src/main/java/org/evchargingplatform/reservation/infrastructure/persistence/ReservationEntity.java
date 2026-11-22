@@ -29,7 +29,7 @@ public class ReservationEntity {
     }
 
     public ReservationEntity(UUID id, String n, UUID s, UUID c, UUID u, UUID v, Instant st, Instant ex,
-            ReservationStatus status, Instant ca, Instant ua) {
+            ReservationStatus status, Instant ca, Instant ua, long version) {
         this.id = id;
         reservationNumber = n;
         stationId = s;
@@ -41,6 +41,7 @@ public class ReservationEntity {
         this.status = status;
         createdAt = ca;
         updatedAt = ua;
+        this.version = version;
     }
 
     public UUID getId() {
@@ -85,5 +86,9 @@ public class ReservationEntity {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public long getVersion() {
+        return version;
     }
 }
