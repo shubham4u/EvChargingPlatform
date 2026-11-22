@@ -87,10 +87,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReservationResponse'
-  /charging/start:
+  /charging/sessions:
     post:
-      summary: Start charging
-      operationId: startCharging
+      summary: Start a charging session
+      operationId: startChargingSession
       requestBody:
         required: true
         content:
@@ -98,33 +98,32 @@ paths:
             schema:
               $ref: '#/components/schemas/StartChargingRequest'
       responses:
-        '200':
-          description: OK
+        '201':
+          description: Created (session is ACTIVE)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ChargingSessionResponse'
-  /charging/stop:
-    post:
-      summary: Stop charging
-      operationId: stopCharging
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/StopChargingRequest'
+        '400':
+          description: Validation failed
+        '409':
+          description: Connector not reserved for the given reservation, connector and user
+    get:
+      summary: List charging sessions
+      operationId: listChargingSessions
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ChargingSessionResponse'
-  /sessions/{id}:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChargingSessionResponse'
+  /charging/sessions/{id}:
     get:
-      summary: Get charging session
-      operationId: getSession
+      summary: Get a charging session
+      operationId: getChargingSession
       parameters:
         - name: id
           in: path
@@ -139,6 +138,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ChargingSessionResponse'
+        '404':
+          description: Charging session not found
+  /charging/sessions/{id}/stop:
+    patch:
+      summary: Stop a charging session
+      operationId: stopChargingSession
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StopChargingRequest'
+      responses:
+        '200':
+          description: OK (session is STOPPED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChargingSessionResponse'
+        '400':
+          description: Validation failed
+        '404':
+          description: Charging session not found
+        '409':
+          description: Invalid state transition (session is not ACTIVE)
 components:
   schemas:
     CreateStationRequest:
@@ -215,7 +246,7 @@ components:
           format: date-time
     StartChargingRequest:
       type: object
-      required: [stationId, connectorId, userId]
+      required: [stationId, connectorId, userId, vehicleId]
       properties:
         stationId:
           type: string
@@ -224,27 +255,30 @@ components:
           type: string
           format: uuid
         userId:
+          type: string
+          format: uuid
+        vehicleId:
           type: string
           format: uuid
         reservationId:
           type: string
           format: uuid
+          nullable: true
+          description: Omit for walk-up charging.
     StopChargingRequest:
       type: object
-      required: [sessionId]
+      required: [totalEnergyKwh]
       properties:
-        sessionId:
-          type: string
-          format: uuid
-        meterReadingKwh:
+        totalEnergyKwh:
           type: number
-          format: double
     ChargingSessionResponse:
       type: object
       properties:
-        sessionId:
+        id:
           type: string
           format: uuid
+        chargingSessionNumber:
+          type: string
         stationId:
           type: string
           format: uuid
@@ -254,14 +288,29 @@ components:
         userId:
           type: string
           format: uuid
+        vehicleId:
+          type: string
+          format: uuid
+        reservationId:
+          type: string
+          format: uuid
+          nullable: true
         status:
           type: string
+          enum: [REQUESTED, ACTIVE, STOPPED]
         startedAt:
           type: string
           format: date-time
         stoppedAt:
           type: string
           format: date-time
+          nullable: true
         totalEnergyKwh:
           type: number
-          format: double
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
