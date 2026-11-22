@@ -1,0 +1,13 @@
+# Used by @DataJpaTest persistence adapter tests: in-memory H2 in PostgreSQL mode,
+# schema built by the real Flyway migrations and validated against the JPA entities.
+# H2 has no TIMESTAMPTZ alias, so INIT declares it as a domain instead of editing applied migrations.
+spring:
+  datasource:
+    url: jdbc:h2:mem:ev_charging;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;INIT=CREATE DOMAIN IF NOT EXISTS TIMESTAMPTZ AS TIMESTAMP WITH TIME ZONE
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
