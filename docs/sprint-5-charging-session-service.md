@@ -1,6 +1,6 @@
 # Sprint 5 — Charging Session Feature (Plan)
 
-> Status: **not started.** This document is the plan and mentor guide for the sprint, written before implementation — unlike the other sprint docs in this folder, which were written after the work was done. Update the "Status" lines as you go instead of rewriting the doc.
+> Status: **done** — see "What we actually built" at the bottom. This document is the plan and mentor guide for the sprint, written before implementation — unlike the other sprint docs in this folder, which were written after the work was done. Update the "Status" lines as you go instead of rewriting the doc.
 
 ## Goal
 
@@ -182,3 +182,87 @@ Work bottom-up, the same order the reservation sprint used, and compile/test aft
 ## How I can help
 
 Ask me to review any layer as you finish it rather than only at the end — same as we'd do with a real PR. If you get stuck on the Kafka gating or the `ObjectProvider` pattern, `ReservationApplicationService.java` and `KafkaReservationEventPublisher.java` are the two files to have open side by side with whatever you're writing. If something in this plan turns out to be wrong once you're in the code (e.g. the projection port doesn't fit the way Decision 1 assumes), that's normal — tell me and we'll adjust the plan rather than force the code to match a doc that was wrong.
+
+---
+
+# What we actually built
+
+Everything above this line is the original plan, left as written. This section records what was implemented, where it deviated, and how it was verified.
+
+## Design decisions — as resolved
+
+| Decision | Choice | Where it's visible |
+|---|---|---|
+| 1 — Validate against the reservation projection? | **Option A.** `start()` injects `ConnectorReservationProjectionRepository` (the port interface, not station persistence classes) and rejects with `ConnectorNotReservedException` (→ `409 Connector not reserved`) when the projection is missing, not `RESERVED`, or belongs to a different connector or user. Walk-up sessions (no `reservationId`) skip the check. | Javadoc on `ChargingSessionApplicationService` |
+| 2 — REST shape | **Reservation convention**: `POST /charging/sessions`, `PATCH /charging/sessions/{id}/stop`, `GET /charging/sessions/{id}`, `GET /charging/sessions`. `api-design.md` and `openapi.yaml` updated to match. | Javadoc on `ChargingSessionApplicationService`, `ChargingController` |
+| 3 — Value objects or raw UUIDs | **Raw UUIDs**, consistent with what `Reservation` actually does. Typed IDs should be a cross-module change, not a Charging-only one. | Javadoc on `ChargingSession` |
+
+## Components
+
+- **Domain:** `ChargingSession` (immutable record, `create` / `start(Clock)` / `stop(totalEnergyKwh, Clock)`; illegal transitions throw `IllegalStateException` → `409 Invalid state transition`), `ChargingSessionStatus`, `ChargingSessionNotFoundException` (→ 404), `ConnectorNotReservedException` (→ 409).
+- **Application:** `ChargingSessionApplicationService`. `start` saves `REQUESTED`, publishes `Requested`, transitions to `ACTIVE`, saves, then publishes `Started`. `stop` saves `STOPPED` and publishes `Stopped`. All three use cases return the saved aggregate.
+- **Persistence:** `ChargingSessionEntity` / `ChargingSessionJpaRepository` / `ChargingSessionJpaAdapter`, Flyway `V5__create_charging_sessions.sql` (indexes on station, connector, user, reservation, status).
+- **Web:** `ChargingController` + `ChargingSessionResponse`; exceptions mapped in the shared `ApiExceptionHandler`.
+- **Messaging:** `KafkaChargingSessionEventPublisher`, gated by `app.messaging.enabled=true`, publishing to `app.messaging.charging-events-topic` (default `charging.events.v1`). Message key = session id. Value = the `events.charging.v1` record, with the `__TypeId__` header added by `JsonSerializer`, exactly like the reservation publisher.
+
+## Deviations from the plan
+
+- **The aggregate has no `ensureNotTerminal()` guard.** Each transition checks its one legal source state (`start` requires `REQUESTED`, `stop` requires `ACTIVE`). That already rejects everything from `STOPPED`, so a separate terminal guard would be redundant with only three states.
+- **No `NewTopic` bean for `charging.events.v1`.** The plan didn't ask for one, and the reservation topic doesn't have one either. Both rely on broker auto-create. The only `NewTopic` beans (`station/infrastructure/kafka/KafkaTopicConfiguration`) are bound to `app.kafka.*`, which `application.yml` doesn't define. At startup this logs `InvalidTopicException: The given topic name 'null'` from `KafkaAdmin`. That's pre-existing, outside this sprint's scope, and doesn't stop the app.
+- **The meter-values stretch goal was not built.** `MeterValueRecordedEvent` remains unused, and nothing was half-wired.
+- **No `Location` header on `POST`**, matching `ReservationController`.
+
+## Bug found during the smoke test
+
+`PATCH /charging/sessions/{id}/stop` returned **500** (`ObjectOptimisticLockingFailureException`) against the real stack. The MockMvc and Mockito tests were green, because they mock the repository. Cause: `ChargingSessionEntity` has `@Version`, but the domain record carries no version, so `ChargingSessionJpaAdapter.toEntity` rebuilt every entity with `version = 0`. `start()` saves twice in one transaction, which leaves the row at `version = 1`, so the next update looked stale to Hibernate.
+
+**Fix:** the adapter now reads the persisted version (`currentVersion(id)`) and passes it into the entity constructor. Optimistic locking still catches concurrent writes between that read and the flush. The domain model is unchanged.
+
+`ReservationJpaAdapter` has the same latent pattern. It isn't hit today only because no reservation use case updates the same row twice. It was left alone, since refactoring the reservation module is out of scope.
+
+## Tests
+
+| Test class | Scope | Tests |
+|---|---|---|
+| `ChargingSessionTest` | Domain: create, start, stop, illegal transitions | 9 |
+| `ChargingSessionApplicationServiceTest` | Start (walk-up: two saves, `Requested` then `Started` in order; valid reservation; projection missing / released / connector mismatch / user mismatch → nothing saved or published; publisher unavailable), stop (happy path with energy, not found, not `ACTIVE`, publisher unavailable), findById, findAll | 14 |
+| `ChargingControllerTest` | `POST` 201 / 400 / 409, `GET` list 200, `GET /{id}` 200 / 404, `PATCH /{id}/stop` 200 / 400 / 404 / 409 | 10 |
+
+**Total: 82 tests, 0 failures, 0 errors — BUILD SUCCESS** (58 before the application service and controller suites, 49 of them outside Charging).
+
+## End-to-End Verification
+
+Run against `docker compose up --build -d` (`KAFKA_ENABLED=true` already set for `station-service` in `docker-compose.yml`) on 2026-11-22:
+
+1. Flyway `flyway_schema_history` showed V1–V5 applied, `5 | create charging sessions | t`.
+2. Walk-up lifecycle with `Invoke-RestMethod`:
+   - `POST /charging/sessions` → `status: ACTIVE`, `startedAt` set (`id 4abe40b8-c959-4deb-9629-6a2012876a59`)
+   - `GET /charging/sessions/{id}` → `ACTIVE`
+   - `PATCH /charging/sessions/{id}/stop` with `{"totalEnergyKwh": 18.25}` → `STOPPED`
+   - `GET /charging/sessions/{id}` → `STOPPED`, `totalEnergyKwh: 18.25`, `stoppedAt` set
+   - Second `PATCH .../stop` → `409`. `GET` with an unknown id → `404`
+3. Reservation-backed start (Decision 1): `POST /reservations` → projection row `RESERVED` → `POST /charging/sessions` with that `reservationId` → `ACTIVE`. The same request with a different `userId` → `409`, with an unknown `reservationId` → `409`, and with `connectorId` missing → `400`.
+4. Kafka, via `kafka-console-consumer.sh --topic charging.events.v1 --from-beginning --property print.key=true`. All three events for one lifecycle, keyed by session id, in order:
+   ```
+   4abe40b8-…  {"eventVersion":1,…,"sessionId":"4abe40b8-…","reservationId":null}                      # Requested
+   4abe40b8-…  {"eventVersion":1,…,"sessionId":"4abe40b8-…","startedAt":1795362942.355469500}          # Started
+   4abe40b8-…  {"eventVersion":1,…,"sessionId":"4abe40b8-…","stoppedAt":1795362942.477032354,"totalEnergyKwh":18.25}  # Stopped
+   ```
+   (The topic also held a `Requested`/`Started` pair from the pre-fix run whose stop failed.)
+5. `docker compose down`.
+
+## Open items
+
+- Events are published inside the `@Transactional` use case, before commit, which is the same pattern as Reservation. A rollback after publish would leave an event on the topic for a state that was never persisted. An outbox would fix this, and it applies to both contexts.
+- Kafka JSON timestamps serialize as epoch-seconds decimals, not ISO-8601 strings as `api-design.md` states for the REST contract. This is consistent across all producers today. It's worth deciding explicitly before a consumer outside this JVM appears.
+- `openapi.yaml` declares `servers: /api`, but the app serves from `/`, and the station/reservation schemas there are out of date. Only the charging section was brought in line this sprint.
+
+## Sprint 5 boundaries
+
+- ✅ Charging is its own package-by-feature module with the same hexagonal shape as `reservation/`
+- ✅ Start / stop / read sessions over REST, persisted in its own table (V5)
+- ✅ `Requested`, `Started`, `Stopped` published to `charging.events.v1` and observed on the real topic
+- ✅ Decisions 1–3 resolved and documented in code
+- ✅ No Kafka consumer added to Charging
+- ✅ Verified against the real Docker Compose stack, which caught a persistence bug the unit tests couldn't
+- ⬜ Meter values (stretch goal), not started

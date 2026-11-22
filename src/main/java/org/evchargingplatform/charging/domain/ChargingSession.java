@@ -6,6 +6,14 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * Charging session aggregate: {@code REQUESTED -> ACTIVE -> STOPPED}.
+ * <p>
+ * Decision 3 (identifiers): foreign references are raw {@link UUID}s, not value objects. This
+ * matches what the {@code Reservation} aggregate actually does (its {@code domain/model} ID
+ * wrappers are unused). Wrapping IDs only in Charging would leave the two contexts inconsistent
+ * without making either one safer. Introducing typed IDs should be a cross-module change.
+ */
 public record ChargingSession(UUID id, String chargingSessionNumber, UUID stationId, UUID connectorId, UUID userId,
         UUID vehicleId, UUID reservationId, ChargingSessionStatus status, Instant startedAt, Instant stoppedAt,
         BigDecimal totalEnergyKwh, Instant createdAt, Instant updatedAt) implements Serializable {

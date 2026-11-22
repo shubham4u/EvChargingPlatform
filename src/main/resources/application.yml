@@ -47,6 +47,7 @@ app:
     enabled: ${KAFKA_ENABLED:false}
     station-topic: ${STATION_EVENTS_TOPIC:station.events.v1}
     reservation-topic: ${RESERVATION_EVENTS_TOPIC:reservation.events.v1}
+    charging-events-topic: ${CHARGING_EVENTS_TOPIC:charging.events.v1}
     consumer-group: ${KAFKA_CONSUMER_GROUP:station-service}
 
 management:

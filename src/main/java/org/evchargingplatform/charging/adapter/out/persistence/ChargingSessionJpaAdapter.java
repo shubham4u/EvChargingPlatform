@@ -1,5 +1,86 @@
 package org.evchargingplatform.charging.adapter.out.persistence;
 
-public class ChargingSessionJpaAdapter {
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+import org.evchargingplatform.charging.application.port.out.ChargingSessionRepository;
+import org.evchargingplatform.charging.domain.ChargingSession;
+import org.evchargingplatform.charging.domain.ChargingSessionStatus;
+import org.evchargingplatform.charging.infrastructure.persistence.ChargingSessionEntity;
+import org.evchargingplatform.charging.infrastructure.persistence.ChargingSessionJpaRepository;
+import org.springframework.stereotype.Component;
+
+@Component
+public class ChargingSessionJpaAdapter implements ChargingSessionRepository {
+    
+    private final ChargingSessionJpaRepository repository;
+
+    public ChargingSessionJpaAdapter(ChargingSessionJpaRepository repository) {
+        this.repository = repository;
+    }
+
+    @Override
+    public List<ChargingSession> findAll() {
+        return repository.findAll().stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public Optional<ChargingSession> findById(UUID id) {
+        return repository.findById(id).map(this::toDomain);
+    }
+
+    @Override
+    public ChargingSession save(ChargingSession chargingSession) {
+        return toDomain(repository.save(toEntity(chargingSession)));
+    }
+
+    // The domain record carries no version, so reuse the persisted one. Rebuilding the entity
+    // with version 0 makes Hibernate reject every update after the first as a stale write.
+    private long currentVersion(UUID id) {
+        return repository.findById(id).map(ChargingSessionEntity::version).orElse(0L);
+    }
+
+    private ChargingSession toDomain(ChargingSessionEntity save) {
+        return new ChargingSession(
+                save.id(),
+                save.chargingSessionNumber(),
+                save.stationId(),
+                save.connectorId(),
+                save.userId(),
+                save.vehicleId(),
+                save.reservationId(),
+                save.status() != null ? ChargingSessionStatus.valueOf(save.status()) : null,
+                save.startedAt(),
+                save.stoppedAt(),
+                save.totalEnergyKwh(),
+                save.createdAt(),
+                save.updatedAt()
+        );
+    }
+
+    @Override
+    public void delete(ChargingSession chargingSession) {
+        repository.delete(toEntity(chargingSession));
+    }
+
+    private ChargingSessionEntity toEntity(ChargingSession chargingSession) {
+        return new ChargingSessionEntity(
+                chargingSession.id(),
+                chargingSession.chargingSessionNumber(),
+                chargingSession.stationId(),
+                chargingSession.connectorId(),
+                chargingSession.userId(),
+                chargingSession.vehicleId(),
+                chargingSession.reservationId(),
+                chargingSession.status().name(),
+                chargingSession.startedAt(),
+                chargingSession.stoppedAt(),
+                chargingSession.totalEnergyKwh(),
+                chargingSession.createdAt(),
+                chargingSession.updatedAt(),
+                currentVersion(chargingSession.id())
+        );
+    }
     
 }
