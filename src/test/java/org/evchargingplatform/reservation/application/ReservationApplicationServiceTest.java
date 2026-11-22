@@ -1,11 +1,18 @@
 package org.evchargingplatform.reservation.application;
 
+import org.evchargingplatform.identity.application.port.in.GetUserUseCase;
+import org.evchargingplatform.identity.domain.exception.UserNotFoundException;
 import org.evchargingplatform.reservation.application.port.in.CreateReservationCommand;
 import org.evchargingplatform.reservation.application.port.out.ReservationEventPublisher;
 import org.evchargingplatform.reservation.domain.Reservation;
 import org.evchargingplatform.reservation.domain.ReservationStatus;
+import org.evchargingplatform.reservation.domain.exception.ConnectorAlreadyReservedException;
 import org.evchargingplatform.reservation.domain.exception.ReservationNotFoundException;
 import org.evchargingplatform.reservation.domain.repository.ReservationRepository;
+import org.evchargingplatform.station.application.port.in.GetConnectorsUseCase;
+import org.evchargingplatform.station.domain.exception.ConnectorNotFoundException;
+import org.evchargingplatform.vehicle.application.port.in.GetVehicleUseCase;
+import org.evchargingplatform.vehicle.domain.exception.VehicleNotOwnedByUserException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -55,12 +62,22 @@ class ReservationApplicationServiceTest {
     @Mock
     private ReservationEventPublisher eventPublisher;
 
+    @Mock
+    private GetUserUseCase getUserUseCase;
+
+    @Mock
+    private GetVehicleUseCase getVehicleUseCase;
+
+    @Mock
+    private GetConnectorsUseCase getConnectorsUseCase;
+
     private ReservationApplicationService service;
 
     @BeforeEach
     void setUp() {
         ObjectProvider<ReservationEventPublisher> provider = new TestEventPublisherProvider(eventPublisher);
-        service = new ReservationApplicationService(reservationRepository, provider, CLOCK);
+        service = new ReservationApplicationService(reservationRepository, provider, CLOCK,
+                getUserUseCase, getVehicleUseCase, getConnectorsUseCase);
     }
 
     /**
@@ -152,6 +169,45 @@ class ReservationApplicationServiceTest {
                     STATION_ID, CHARGER_ID, USER_ID, VEHICLE_ID, pastStart);
 
             assertThrows(IllegalArgumentException.class, () -> service.create(command));
+            verify(reservationRepository, never()).save(any());
+            verify(eventPublisher, never()).reservationCreated(any());
+        }
+
+        @Test
+        @DisplayName("should reject an unknown user")
+        void shouldThrowWhenUserUnknown() {
+            when(getUserUseCase.findById(USER_ID)).thenThrow(new UserNotFoundException(USER_ID));
+
+            assertThrows(UserNotFoundException.class, () -> service.create(validCommand()));
+            verify(reservationRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("should reject a vehicle that belongs to another user")
+        void shouldThrowWhenVehicleNotOwned() {
+            when(getVehicleUseCase.findOwnedBy(VEHICLE_ID, USER_ID))
+                    .thenThrow(new VehicleNotOwnedByUserException(VEHICLE_ID, USER_ID));
+
+            assertThrows(VehicleNotOwnedByUserException.class, () -> service.create(validCommand()));
+            verify(reservationRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("should reject a charger that is not a connector at the station")
+        void shouldThrowWhenConnectorNotAtStation() {
+            when(getConnectorsUseCase.findAtStation(STATION_ID, CHARGER_ID))
+                    .thenThrow(new ConnectorNotFoundException(STATION_ID, CHARGER_ID));
+
+            assertThrows(ConnectorNotFoundException.class, () -> service.create(validCommand()));
+            verify(reservationRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("should reject a reservation that overlaps an open one on the same charger")
+        void shouldThrowWhenOverlapping() {
+            when(reservationRepository.existsOverlapping(any(), any(), any(), any())).thenReturn(true);
+
+            assertThrows(ConnectorAlreadyReservedException.class, () -> service.create(validCommand()));
             verify(reservationRepository, never()).save(any());
             verify(eventPublisher, never()).reservationCreated(any());
         }
@@ -293,6 +349,11 @@ class ReservationApplicationServiceTest {
             verify(reservationRepository, never()).save(any());
             verify(eventPublisher, never()).reservationExpired(any());
         }
+    }
+
+    private CreateReservationCommand validCommand() {
+        return new CreateReservationCommand(STATION_ID, CHARGER_ID, USER_ID, VEHICLE_ID,
+                FIXED_NOW.plus(Duration.ofMinutes(5)));
     }
 
     private Reservation createReservation() {

@@ -16,14 +16,26 @@ We designed and implemented the project step by step:
 
 ## Current focus
 
-The current runtime service is centered on the station feature. It follows a package-by-feature and hexagonal-style structure so the business logic stays separate from web, persistence, and messaging adapters.
+One Spring Boot application with five package-by-feature, hexagonal modules. Each module owns its own tables and publishes its own Kafka events:
 
-Key endpoints include:
+| Module | What it does | Endpoints |
+|---|---|---|
+| `identity` | Register drivers | `/users` |
+| `vehicle` | Register EVs to a driver | `/vehicles` |
+| `station` | Stations, their connectors, and a reservation read-model fed by Kafka | `/stations`, `/stations/{id}/connectors` |
+| `reservation` | Reserve a connector for a time window | `/reservations` |
+| `charging` | Start and stop charging sessions | `/charging/sessions` |
 
-- `POST /stations`
-- `GET /stations`
-- `GET /stations/{id}`
-- `GET /actuator/health`
+A driver can register, add their EV, reserve a connector, start charging, and stop. Every reference is checked: you can't charge someone else's car, use a connector at the wrong station, take a connector that is busy or reserved by someone else, or charge one car twice at once. There is no login yet; user ids are passed in request bodies.
+
+### Try the full journey
+
+```powershell
+docker compose up --build -d
+.\scripts\demo-flow.ps1
+```
+
+See [API smoke test](docs/api-smoke-test.md) for the manual steps and [API design](docs/api-design.md) for every endpoint and error code.
 
 ## How we validated it
 
@@ -66,6 +78,7 @@ Supporting docs are in the `docs/` folder:
 - [API smoke test](docs/api-smoke-test.md)
 - [Testing and fixes](docs/testing-and-fixes.md)
 - [Station service notes](docs/station-service.md)
+- Sprint notes: [2](docs/sprint-2-event-publishing.md) · [3](docs/sprint-3-reservation-service.md) · [4](docs/sprint-4-event-consumption.md) · [5](docs/sprint-5-charging-session-service.md) · [6](docs/sprint-6-users-vehicles-connectors.md)
 
 ## Local development
 

@@ -1,14 +1,22 @@
 package org.evchargingplatform.shared.web;
 
 import org.evchargingplatform.charging.domain.exception.ChargingSessionNotFoundException;
+import org.evchargingplatform.charging.domain.exception.ConnectorInUseException;
 import org.evchargingplatform.charging.domain.exception.ConnectorNotReservedException;
+import org.evchargingplatform.charging.domain.exception.VehicleAlreadyChargingException;
+import org.evchargingplatform.identity.domain.exception.DuplicateUserException;
+import org.evchargingplatform.identity.domain.exception.UserNotFoundException;
 import org.evchargingplatform.reservation.domain.exception.ConnectorAlreadyReservedException;
 import org.evchargingplatform.reservation.domain.exception.ReservationAlreadyCancelledException;
 import org.evchargingplatform.reservation.domain.exception.ReservationAlreadyConfirmedException;
 import org.evchargingplatform.reservation.domain.exception.ReservationAlreadyExpiredException;
 import org.evchargingplatform.reservation.domain.exception.ReservationNotFoundException;
+import org.evchargingplatform.station.domain.exception.ConnectorNotFoundException;
 import org.evchargingplatform.station.domain.exception.DuplicateStationException;
 import org.evchargingplatform.station.domain.exception.StationNotFoundException;
+import org.evchargingplatform.vehicle.domain.exception.DuplicateVehicleException;
+import org.evchargingplatform.vehicle.domain.exception.VehicleNotFoundException;
+import org.evchargingplatform.vehicle.domain.exception.VehicleNotOwnedByUserException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -31,6 +39,40 @@ public class ApiExceptionHandler {
     @ExceptionHandler(DuplicateStationException.class)
     ProblemDetail handleDuplicateStation(DuplicateStationException exception) {
         return problem(HttpStatus.CONFLICT, "Station already exists", exception.getMessage());
+    }
+
+    @ExceptionHandler(ConnectorNotFoundException.class)
+    ProblemDetail handleConnectorNotFound(ConnectorNotFoundException exception) {
+        return problem(HttpStatus.NOT_FOUND, "Connector not found", exception.getMessage());
+    }
+
+    // --- Identity exceptions ---
+
+    @ExceptionHandler(UserNotFoundException.class)
+    ProblemDetail handleUserNotFound(UserNotFoundException exception) {
+        return problem(HttpStatus.NOT_FOUND, "User not found", exception.getMessage());
+    }
+
+    @ExceptionHandler(DuplicateUserException.class)
+    ProblemDetail handleDuplicateUser(DuplicateUserException exception) {
+        return problem(HttpStatus.CONFLICT, "User already exists", exception.getMessage());
+    }
+
+    // --- Vehicle exceptions ---
+
+    @ExceptionHandler(VehicleNotFoundException.class)
+    ProblemDetail handleVehicleNotFound(VehicleNotFoundException exception) {
+        return problem(HttpStatus.NOT_FOUND, "Vehicle not found", exception.getMessage());
+    }
+
+    @ExceptionHandler(DuplicateVehicleException.class)
+    ProblemDetail handleDuplicateVehicle(DuplicateVehicleException exception) {
+        return problem(HttpStatus.CONFLICT, "Vehicle already registered", exception.getMessage());
+    }
+
+    @ExceptionHandler(VehicleNotOwnedByUserException.class)
+    ProblemDetail handleVehicleNotOwned(VehicleNotOwnedByUserException exception) {
+        return problem(HttpStatus.CONFLICT, "Vehicle not owned by user", exception.getMessage());
     }
 
     // --- Reservation exceptions ---
@@ -71,6 +113,17 @@ public class ApiExceptionHandler {
     ProblemDetail handleConnectorNotReserved(ConnectorNotReservedException exception) {
         return problem(HttpStatus.CONFLICT, "Connector not reserved", exception.getMessage());
     }
+
+    @ExceptionHandler(ConnectorInUseException.class)
+    ProblemDetail handleConnectorInUse(ConnectorInUseException exception) {
+        return problem(HttpStatus.CONFLICT, "Connector in use", exception.getMessage());
+    }
+
+    @ExceptionHandler(VehicleAlreadyChargingException.class)
+    ProblemDetail handleVehicleAlreadyCharging(VehicleAlreadyChargingException exception) {
+        return problem(HttpStatus.CONFLICT, "Vehicle already charging", exception.getMessage());
+    }
+
     // --- Generic exceptions ---
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

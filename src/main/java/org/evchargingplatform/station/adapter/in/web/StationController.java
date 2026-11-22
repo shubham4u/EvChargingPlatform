@@ -1,8 +1,11 @@
 package org.evchargingplatform.station.adapter.in.web;
 
 import jakarta.validation.Valid;
+import org.evchargingplatform.station.application.port.in.AddConnectorCommand;
+import org.evchargingplatform.station.application.port.in.AddConnectorUseCase;
 import org.evchargingplatform.station.application.port.in.CreateStationCommand;
 import org.evchargingplatform.station.application.port.in.CreateStationUseCase;
+import org.evchargingplatform.station.application.port.in.GetConnectorsUseCase;
 import org.evchargingplatform.station.application.port.in.GetStationsUseCase;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,10 +24,15 @@ import java.util.UUID;
 public class StationController {
     private final CreateStationUseCase createStationUseCase;
     private final GetStationsUseCase getStationsUseCase;
+    private final AddConnectorUseCase addConnectorUseCase;
+    private final GetConnectorsUseCase getConnectorsUseCase;
 
-    public StationController(CreateStationUseCase createStationUseCase, GetStationsUseCase getStationsUseCase) {
+    public StationController(CreateStationUseCase createStationUseCase, GetStationsUseCase getStationsUseCase,
+                             AddConnectorUseCase addConnectorUseCase, GetConnectorsUseCase getConnectorsUseCase) {
         this.createStationUseCase = createStationUseCase;
         this.getStationsUseCase = getStationsUseCase;
+        this.addConnectorUseCase = addConnectorUseCase;
+        this.getConnectorsUseCase = getConnectorsUseCase;
     }
 
     @PostMapping
@@ -43,5 +51,17 @@ public class StationController {
     @GetMapping("/{id}")
     StationResponse findById(@PathVariable UUID id) {
         return StationResponse.from(getStationsUseCase.findById(id));
+    }
+
+    @PostMapping("/{id}/connectors")
+    @ResponseStatus(HttpStatus.CREATED)
+    ConnectorResponse addConnector(@PathVariable UUID id, @Valid @RequestBody AddConnectorRequest request) {
+        return ConnectorResponse.from(addConnectorUseCase.addConnector(
+                new AddConnectorCommand(id, request.connectorType(), request.maxPowerKw())));
+    }
+
+    @GetMapping("/{id}/connectors")
+    List<ConnectorResponse> findConnectors(@PathVariable UUID id) {
+        return getConnectorsUseCase.findByStation(id).stream().map(ConnectorResponse::from).toList();
     }
 }

@@ -1,10 +1,122 @@
 openapi: 3.0.3
 info:
   title: EV Charging Network Platform API
-  version: 1.0.0
+  version: 1.1.0
+  description: >
+    Driver journey: register a user, register their EV, find a station's connectors,
+    optionally reserve one, start and stop a charging session. Errors are RFC 7807
+    problem details (see ProblemDetail). There is no authentication yet; user ids are
+    passed in request bodies and validated against registered users.
 servers:
-  - url: /api
+  - url: http://localhost:8080
 paths:
+  /users:
+    post:
+      summary: Register a driver
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterUserRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '409':
+          description: User already exists (email, case-insensitive)
+    get:
+      summary: List users
+      operationId: listUsers
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserResponse'
+  /users/{id}:
+    get:
+      summary: Get a user
+      operationId: getUser
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '404':
+          description: User not found
+  /vehicles:
+    post:
+      summary: Register an EV to a user
+      operationId: registerVehicle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterVehicleRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VehicleResponse'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '404':
+          description: Owner user not found
+        '409':
+          description: Vehicle already registered (VIN)
+    get:
+      summary: List vehicles, optionally for one owner
+      operationId: listVehicles
+      parameters:
+        - name: ownerUserId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/VehicleResponse'
+        '404':
+          description: Owner user not found (when ownerUserId is given)
+  /vehicles/{id}:
+    get:
+      summary: Get a vehicle
+      operationId: getVehicle
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VehicleResponse'
+        '404':
+          description: Vehicle not found
   /stations:
     post:
       summary: Create a station
@@ -22,6 +134,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StationResponse'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '409':
+          description: Station already exists (externalReference)
     get:
       summary: List stations
       operationId: listStations
@@ -39,12 +155,7 @@ paths:
       summary: Get a station
       operationId: getStation
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
+        - $ref: '#/components/parameters/Id'
       responses:
         '200':
           description: OK
@@ -52,6 +163,47 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StationResponse'
+        '404':
+          description: Station not found
+  /stations/{id}/connectors:
+    post:
+      summary: Add a connector to a station
+      operationId: addConnector
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddConnectorRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorResponse'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '404':
+          description: Station not found
+    get:
+      summary: List a station's connectors
+      operationId: listConnectors
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ConnectorResponse'
+        '404':
+          description: Station not found
   /reservations:
     post:
       summary: Create a reservation
@@ -69,17 +221,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReservationResponse'
+        '400':
+          description: Validation failed, or startTime is in the past
+        '404':
+          description: User not found, or connector not found at the station
+        '409':
+          description: Vehicle not owned by user, or connector already reserved for an overlapping window
+    get:
+      summary: List reservations
+      operationId: listReservations
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReservationResponse'
   /reservations/{id}:
     get:
       summary: Get a reservation
       operationId: getReservation
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
+        - $ref: '#/components/parameters/Id'
       responses:
         '200':
           description: OK
@@ -87,6 +252,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReservationResponse'
+        '404':
+          description: Reservation not found
+  /reservations/{id}/cancel:
+    patch:
+      summary: Cancel a reservation
+      operationId: cancelReservation
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationResponse'
+        '404':
+          description: Reservation not found
+        '409':
+          description: Reservation is already terminal
+  /reservations/{id}/complete:
+    patch:
+      summary: Complete an active reservation
+      operationId: completeReservation
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationResponse'
+        '404':
+          description: Reservation not found
+        '409':
+          description: Only ACTIVE reservations can complete
   /charging/sessions:
     post:
       summary: Start a charging session
@@ -105,9 +306,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ChargingSessionResponse'
         '400':
-          description: Validation failed
+          $ref: '#/components/responses/ValidationFailed'
+        '404':
+          description: User, vehicle, or connector at the station not found
         '409':
-          description: Connector not reserved for the given reservation, connector and user
+          description: >
+            Vehicle not owned by user; connector in use (active session, or held by another
+            reservation); vehicle already charging; or connector not reserved for the given reservation
     get:
       summary: List charging sessions
       operationId: listChargingSessions
@@ -125,12 +330,7 @@ paths:
       summary: Get a charging session
       operationId: getChargingSession
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
+        - $ref: '#/components/parameters/Id'
       responses:
         '200':
           description: OK
@@ -145,12 +345,7 @@ paths:
       summary: Stop a charging session
       operationId: stopChargingSession
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
+        - $ref: '#/components/parameters/Id'
       requestBody:
         required: true
         content:
@@ -165,36 +360,136 @@ paths:
               schema:
                 $ref: '#/components/schemas/ChargingSessionResponse'
         '400':
-          description: Validation failed
+          $ref: '#/components/responses/ValidationFailed'
         '404':
           description: Charging session not found
         '409':
           description: Invalid state transition (session is not ACTIVE)
 components:
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    ValidationFailed:
+      description: Validation failed
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
   schemas:
+    ProblemDetail:
+      type: object
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+    RegisterUserRequest:
+      type: object
+      required: [email, displayName]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        displayName:
+          type: string
+          maxLength: 100
+        phoneNumber:
+          type: string
+          maxLength: 30
+    UserResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        displayName:
+          type: string
+        phoneNumber:
+          type: string
+          nullable: true
+        role:
+          type: string
+          enum: [DRIVER]
+        createdAt:
+          type: string
+          format: date-time
+    RegisterVehicleRequest:
+      type: object
+      required: [ownerUserId, vin, make, model]
+      properties:
+        ownerUserId:
+          type: string
+          format: uuid
+        vin:
+          type: string
+          pattern: '^[A-HJ-NPR-Za-hj-npr-z0-9]{17}$'
+        make:
+          type: string
+          maxLength: 50
+        model:
+          type: string
+          maxLength: 50
+    VehicleResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        ownerUserId:
+          type: string
+          format: uuid
+        vin:
+          type: string
+        make:
+          type: string
+        model:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
     CreateStationRequest:
       type: object
-      required: [externalRef, name, countryCode, latitude, longitude]
+      required: [externalReference, name]
       properties:
-        externalRef:
+        externalReference:
           type: string
+          maxLength: 100
         name:
           type: string
+          maxLength: 200
         countryCode:
           type: string
+          pattern: '^[A-Z]{2}$'
         latitude:
           type: number
-          format: double
+          minimum: -90
+          maximum: 90
         longitude:
           type: number
-          format: double
+          minimum: -180
+          maximum: 180
     StationResponse:
       type: object
       properties:
-        stationId:
+        id:
           type: string
           format: uuid
-        externalRef:
+        externalReference:
           type: string
         name:
           type: string
@@ -202,46 +497,97 @@ components:
           type: string
         latitude:
           type: number
-          format: double
         longitude:
           type: number
-          format: double
         status:
           type: string
+          enum: [ACTIVE, INACTIVE, MAINTENANCE]
+        createdAt:
+          type: string
+          format: date-time
+    AddConnectorRequest:
+      type: object
+      required: [connectorType, maxPowerKw]
+      properties:
+        connectorType:
+          $ref: '#/components/schemas/ConnectorType'
+        maxPowerKw:
+          type: integer
+          minimum: 1
+          maximum: 1000
+    ConnectorResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        stationId:
+          type: string
+          format: uuid
+        connectorType:
+          $ref: '#/components/schemas/ConnectorType'
+        maxPowerKw:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+    ConnectorType:
+      type: string
+      enum: [TYPE2, CCS2, CHADEMO, CCS1, NACS]
     CreateReservationRequest:
       type: object
-      required: [stationId, connectorId, userId, expiresAt]
+      required: [stationId, chargerId, userId, vehicleId, startTime]
       properties:
         stationId:
           type: string
           format: uuid
-        connectorId:
+        chargerId:
           type: string
           format: uuid
+          description: Connector id at the station.
         userId:
           type: string
           format: uuid
-        expiresAt:
+        vehicleId:
+          type: string
+          format: uuid
+        startTime:
           type: string
           format: date-time
+          description: Must be in the future. The hold lasts 10 minutes from startTime.
     ReservationResponse:
       type: object
       properties:
-        reservationId:
+        id:
           type: string
           format: uuid
+        reservationNumber:
+          type: string
         stationId:
           type: string
           format: uuid
-        connectorId:
+        chargerId:
           type: string
           format: uuid
         userId:
           type: string
           format: uuid
+        vehicleId:
+          type: string
+          format: uuid
+        startTime:
+          type: string
+          format: date-time
+        expirationTime:
+          type: string
+          format: date-time
         status:
           type: string
-        expiresAt:
+          enum: [CREATED, ACTIVE, CANCELLED, COMPLETED, EXPIRED]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
           type: string
           format: date-time
     StartChargingRequest:

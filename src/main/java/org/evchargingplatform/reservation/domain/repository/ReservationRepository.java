@@ -24,4 +24,7 @@ public interface ReservationRepository {
     List<Reservation> findAll();
 
     List<Reservation> findExpired(Collection<ReservationStatus> statuses, Instant at);
+
+    /** True if a reservation in one of {@code statuses} on the charger overlaps {@code [start, end)}. */
+    boolean existsOverlapping(UUID chargerId, Collection<ReservationStatus> statuses, Instant start, Instant end);
 }

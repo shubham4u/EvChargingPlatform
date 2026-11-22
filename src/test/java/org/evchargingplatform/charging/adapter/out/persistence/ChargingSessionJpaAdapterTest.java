@@ -82,6 +82,26 @@ class ChargingSessionJpaAdapterTest {
         assertEquals(1, adapter.findAll().size());
     }
 
+    @Test
+    @DisplayName("should report open sessions per connector and vehicle until the session stops")
+    void shouldReportOpenSessions() {
+        UUID connectorId = UUID.randomUUID();
+        UUID vehicleId = UUID.randomUUID();
+        ChargingSession active = adapter.save(ChargingSession.create(
+                UUID.randomUUID(), connectorId, UUID.randomUUID(), vehicleId, null, CLOCK).start(CLOCK));
+        flushAndClear();
+
+        assertTrue(adapter.existsOpenSessionForConnector(connectorId));
+        assertTrue(adapter.existsOpenSessionForVehicle(vehicleId));
+        assertFalse(adapter.existsOpenSessionForConnector(UUID.randomUUID()));
+
+        adapter.save(adapter.findById(active.id()).orElseThrow().stop(BigDecimal.ONE, CLOCK));
+        flushAndClear();
+
+        assertFalse(adapter.existsOpenSessionForConnector(connectorId));
+        assertFalse(adapter.existsOpenSessionForVehicle(vehicleId));
+    }
+
     private void flushAndClear() {
         entityManager.flush();
         entityManager.clear();

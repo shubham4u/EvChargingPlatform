@@ -14,6 +14,9 @@ import org.springframework.stereotype.Component;
 @Component
 public class ChargingSessionJpaAdapter implements ChargingSessionRepository {
     
+    private static final List<String> OPEN_STATUSES = List.of(
+            ChargingSessionStatus.REQUESTED.name(), ChargingSessionStatus.ACTIVE.name());
+
     private final ChargingSessionJpaRepository repository;
 
     public ChargingSessionJpaAdapter(ChargingSessionJpaRepository repository) {
@@ -57,6 +60,16 @@ public class ChargingSessionJpaAdapter implements ChargingSessionRepository {
                 save.createdAt(),
                 save.updatedAt()
         );
+    }
+
+    @Override
+    public boolean existsOpenSessionForConnector(UUID connectorId) {
+        return repository.existsByConnectorIdAndStatusIn(connectorId, OPEN_STATUSES);
+    }
+
+    @Override
+    public boolean existsOpenSessionForVehicle(UUID vehicleId) {
+        return repository.existsByVehicleIdAndStatusIn(vehicleId, OPEN_STATUSES);
     }
 
     @Override
