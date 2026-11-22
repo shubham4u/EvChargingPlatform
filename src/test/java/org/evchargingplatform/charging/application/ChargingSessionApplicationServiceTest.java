@@ -6,10 +6,18 @@ import org.evchargingplatform.charging.application.port.out.ChargingSessionRepos
 import org.evchargingplatform.charging.domain.ChargingSession;
 import org.evchargingplatform.charging.domain.ChargingSessionStatus;
 import org.evchargingplatform.charging.domain.exception.ChargingSessionNotFoundException;
+import org.evchargingplatform.charging.domain.exception.ConnectorInUseException;
 import org.evchargingplatform.charging.domain.exception.ConnectorNotReservedException;
+import org.evchargingplatform.charging.domain.exception.VehicleAlreadyChargingException;
+import org.evchargingplatform.identity.application.port.in.GetUserUseCase;
+import org.evchargingplatform.identity.domain.exception.UserNotFoundException;
+import org.evchargingplatform.station.application.port.in.GetConnectorsUseCase;
+import org.evchargingplatform.station.domain.exception.ConnectorNotFoundException;
 import org.evchargingplatform.station.application.port.out.ConnectorReservationProjectionRepository;
 import org.evchargingplatform.station.domain.ConnectorReservationProjection;
 import org.evchargingplatform.station.domain.ConnectorReservationProjection.ReservationProjectionStatus;
+import org.evchargingplatform.vehicle.application.port.in.GetVehicleUseCase;
+import org.evchargingplatform.vehicle.domain.exception.VehicleNotOwnedByUserException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -42,7 +50,8 @@ import static org.mockito.Mockito.*;
  * Unit tests for {@link ChargingSessionApplicationService}.
  * <p>
  * Uses mock repositories and a real {@link ObjectProvider} wrapper around a mock
- * event publisher to test use case orchestration in isolation.
+ * event publisher to test use case orchestration in isolation. The user, vehicle and
+ * connector lookups are mocks that return normally unless a test makes them throw.
  */
 @ExtendWith(MockitoExtension.class)
 class ChargingSessionApplicationServiceTest {
@@ -65,12 +74,25 @@ class ChargingSessionApplicationServiceTest {
     @Mock
     private ConnectorReservationProjectionRepository projectionRepository;
 
+    @Mock
+    private GetUserUseCase getUserUseCase;
+
+    @Mock
+    private GetVehicleUseCase getVehicleUseCase;
+
+    @Mock
+    private GetConnectorsUseCase getConnectorsUseCase;
+
     private ChargingSessionApplicationService service;
 
     @BeforeEach
     void setUp() {
-        ObjectProvider<ChargingSessionEventPublisher> provider = new TestEventPublisherProvider(eventPublisher);
-        service = new ChargingSessionApplicationService(chargingSessionRepository, provider, CLOCK, projectionRepository);
+        service = newService(new TestEventPublisherProvider(eventPublisher));
+    }
+
+    private ChargingSessionApplicationService newService(ObjectProvider<ChargingSessionEventPublisher> provider) {
+        return new ChargingSessionApplicationService(chargingSessionRepository, provider, CLOCK, projectionRepository,
+                getUserUseCase, getVehicleUseCase, getConnectorsUseCase);
     }
 
     /**
@@ -160,7 +182,10 @@ class ChargingSessionApplicationServiceTest {
 
             assertEquals(ChargingSessionStatus.REQUESTED, captor.getAllValues().get(0).status());
             assertEquals(ChargingSessionStatus.ACTIVE, captor.getAllValues().get(1).status());
-            verifyNoInteractions(projectionRepository);
+            verify(getUserUseCase).findById(USER_ID);
+            verify(getVehicleUseCase).findOwnedBy(VEHICLE_ID, USER_ID);
+            verify(getConnectorsUseCase).findAtStation(STATION_ID, CONNECTOR_ID);
+            verify(projectionRepository, never()).findByReservationId(any());
         }
 
         @Test
@@ -218,10 +243,79 @@ class ChargingSessionApplicationServiceTest {
         }
 
         @Test
+        @DisplayName("should reject an unknown user without saving or publishing")
+        void shouldThrowWhenUserUnknown() {
+            when(getUserUseCase.findById(USER_ID)).thenThrow(new UserNotFoundException(USER_ID));
+
+            assertThrows(UserNotFoundException.class, () -> service.start(command(null)));
+            verifyNothingSavedOrPublished();
+        }
+
+        @Test
+        @DisplayName("should reject a vehicle that belongs to another user")
+        void shouldThrowWhenVehicleNotOwned() {
+            when(getVehicleUseCase.findOwnedBy(VEHICLE_ID, USER_ID))
+                    .thenThrow(new VehicleNotOwnedByUserException(VEHICLE_ID, USER_ID));
+
+            assertThrows(VehicleNotOwnedByUserException.class, () -> service.start(command(null)));
+            verifyNothingSavedOrPublished();
+        }
+
+        @Test
+        @DisplayName("should reject a connector that is not at the station")
+        void shouldThrowWhenConnectorNotAtStation() {
+            when(getConnectorsUseCase.findAtStation(STATION_ID, CONNECTOR_ID))
+                    .thenThrow(new ConnectorNotFoundException(STATION_ID, CONNECTOR_ID));
+
+            assertThrows(ConnectorNotFoundException.class, () -> service.start(command(null)));
+            verifyNothingSavedOrPublished();
+        }
+
+        @Test
+        @DisplayName("should reject a connector that already has an open session")
+        void shouldThrowWhenConnectorInUse() {
+            when(chargingSessionRepository.existsOpenSessionForConnector(CONNECTOR_ID)).thenReturn(true);
+
+            assertThrows(ConnectorInUseException.class, () -> service.start(command(null)));
+            verifyNothingSavedOrPublished();
+        }
+
+        @Test
+        @DisplayName("should reject a vehicle that is already charging elsewhere")
+        void shouldThrowWhenVehicleAlreadyCharging() {
+            when(chargingSessionRepository.existsOpenSessionForVehicle(VEHICLE_ID)).thenReturn(true);
+
+            assertThrows(VehicleAlreadyChargingException.class, () -> service.start(command(null)));
+            verifyNothingSavedOrPublished();
+        }
+
+        @Test
+        @DisplayName("should reject a walk-up start while a reservation holds the connector")
+        void shouldThrowWhenWalkUpOnHeldConnector() {
+            when(projectionRepository.findByStationIdAndStatus(STATION_ID, ReservationProjectionStatus.RESERVED))
+                    .thenReturn(List.of(projection(ReservationProjectionStatus.RESERVED, CONNECTOR_ID, UUID.randomUUID())));
+
+            assertThrows(ConnectorInUseException.class, () -> service.start(command(null)));
+            verifyNothingSavedOrPublished();
+        }
+
+        @Test
+        @DisplayName("should ignore a reservation hold whose expiry has passed")
+        void shouldIgnoreExpiredHold() {
+            ConnectorReservationProjection expired = new ConnectorReservationProjection(
+                    RESERVATION_ID, STATION_ID, CONNECTOR_ID, UUID.randomUUID(),
+                    ReservationProjectionStatus.RESERVED, FIXED_NOW.minusSeconds(60), FIXED_NOW);
+            when(projectionRepository.findByStationIdAndStatus(STATION_ID, ReservationProjectionStatus.RESERVED))
+                    .thenReturn(List.of(expired));
+            when(chargingSessionRepository.save(any(ChargingSession.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+            assertEquals(ChargingSessionStatus.ACTIVE, service.start(command(null)).status());
+        }
+
+        @Test
         @DisplayName("should start without error when no event publisher is available")
         void shouldStartWhenPublisherUnavailable() {
-            service = new ChargingSessionApplicationService(
-                    chargingSessionRepository, new TestEventPublisherProvider(null), CLOCK, projectionRepository);
+            service = newService(new TestEventPublisherProvider(null));
             when(chargingSessionRepository.save(any(ChargingSession.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
             ChargingSession result = assertDoesNotThrow(() -> service.start(command(null)));
@@ -279,8 +373,7 @@ class ChargingSessionApplicationServiceTest {
         @Test
         @DisplayName("should stop without error when no event publisher is available")
         void shouldStopWhenPublisherUnavailable() {
-            service = new ChargingSessionApplicationService(
-                    chargingSessionRepository, new TestEventPublisherProvider(null), CLOCK, projectionRepository);
+            service = newService(new TestEventPublisherProvider(null));
             ChargingSession active = createSession().start(CLOCK);
             when(chargingSessionRepository.findById(active.id())).thenReturn(Optional.of(active));
             when(chargingSessionRepository.save(any(ChargingSession.class))).thenAnswer(invocation -> invocation.getArgument(0));

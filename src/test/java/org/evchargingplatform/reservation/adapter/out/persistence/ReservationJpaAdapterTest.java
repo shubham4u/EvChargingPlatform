@@ -16,6 +16,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -60,6 +61,33 @@ class ReservationJpaAdapterTest {
 
         assertEquals(ReservationStatus.COMPLETED, adapter.findById(created.id()).orElseThrow().status());
         assertEquals(2L, jpaRepository.findById(created.id()).orElseThrow().getVersion());
+    }
+
+    @Test
+    @DisplayName("should detect overlapping open reservations on the same charger only")
+    void shouldDetectOverlap() {
+        UUID chargerId = UUID.randomUUID();
+        // window [12:05, 12:15)
+        Reservation existing = Reservation.create(UUID.randomUUID(), chargerId, UUID.randomUUID(),
+                UUID.randomUUID(), FIXED_NOW.plus(Duration.ofMinutes(5)), CLOCK);
+        adapter.save(existing);
+        flushAndClear();
+        List<ReservationStatus> open = List.of(ReservationStatus.CREATED, ReservationStatus.ACTIVE);
+
+        assertTrue(adapter.existsOverlapping(chargerId, open, at(10), at(20)));
+        assertTrue(adapter.existsOverlapping(chargerId, open, at(0), at(6)));
+        assertFalse(adapter.existsOverlapping(chargerId, open, at(15), at(25)), "touching end is not an overlap");
+        assertFalse(adapter.existsOverlapping(chargerId, open, at(0), at(5)), "touching start is not an overlap");
+        assertFalse(adapter.existsOverlapping(UUID.randomUUID(), open, at(10), at(20)));
+
+        adapter.save(adapter.findById(existing.id()).orElseThrow().cancel(CLOCK));
+        flushAndClear();
+
+        assertFalse(adapter.existsOverlapping(chargerId, open, at(10), at(20)), "cancelled no longer blocks");
+    }
+
+    private static Instant at(int minutesAfterNow) {
+        return FIXED_NOW.plus(Duration.ofMinutes(minutesAfterNow));
     }
 
     private void flushAndClear() {

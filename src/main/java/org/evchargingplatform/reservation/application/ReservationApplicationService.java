@@ -1,5 +1,6 @@
 package org.evchargingplatform.reservation.application;
 
+import org.evchargingplatform.identity.application.port.in.GetUserUseCase;
 import org.evchargingplatform.reservation.application.port.in.CancelReservationUseCase;
 import org.evchargingplatform.reservation.application.port.in.CompleteReservationUseCase;
 import org.evchargingplatform.reservation.application.port.in.CreateReservationCommand;
@@ -9,8 +10,11 @@ import org.evchargingplatform.reservation.application.port.in.GetReservationUseC
 import org.evchargingplatform.reservation.application.port.out.ReservationEventPublisher;
 import org.evchargingplatform.reservation.domain.Reservation;
 import org.evchargingplatform.reservation.domain.ReservationStatus;
+import org.evchargingplatform.reservation.domain.exception.ConnectorAlreadyReservedException;
 import org.evchargingplatform.reservation.domain.exception.ReservationNotFoundException;
 import org.evchargingplatform.reservation.domain.repository.ReservationRepository;
+import org.evchargingplatform.station.application.port.in.GetConnectorsUseCase;
+import org.evchargingplatform.vehicle.application.port.in.GetVehicleUseCase;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
@@ -28,6 +32,11 @@ import java.util.UUID;
  * <p>
  * This is the orchestration layer: it coordinates domain logic, persistence,
  * and event publishing without containing business rules itself.
+ * <p>
+ * Sprint 6: {@link #create} checks the user, that the vehicle is theirs, and that the charger is a
+ * connector at the station, through each owning context's query use case in-process. It then
+ * refuses a reservation whose time window overlaps an open (CREATED or ACTIVE) one on the same
+ * charger.
  */
 @Service
 @Transactional
@@ -41,14 +50,23 @@ public class ReservationApplicationService implements
     private final ReservationRepository reservationRepository;
     private final ObjectProvider<ReservationEventPublisher> eventPublisher;
     private final Clock clock;
+    private final GetUserUseCase getUserUseCase;
+    private final GetVehicleUseCase getVehicleUseCase;
+    private final GetConnectorsUseCase getConnectorsUseCase;
 
     public ReservationApplicationService(
             ReservationRepository reservationRepository,
             ObjectProvider<ReservationEventPublisher> eventPublisher,
-            Clock clock) {
+            Clock clock,
+            GetUserUseCase getUserUseCase,
+            GetVehicleUseCase getVehicleUseCase,
+            GetConnectorsUseCase getConnectorsUseCase) {
         this.reservationRepository = reservationRepository;
         this.eventPublisher = eventPublisher;
         this.clock = clock;
+        this.getUserUseCase = getUserUseCase;
+        this.getVehicleUseCase = getVehicleUseCase;
+        this.getConnectorsUseCase = getConnectorsUseCase;
     }
 
     @Override
@@ -60,6 +78,14 @@ public class ReservationApplicationService implements
                 command.vehicleId(),
                 command.startTime(),
                 clock);
+        getUserUseCase.findById(command.userId());
+        getVehicleUseCase.findOwnedBy(command.vehicleId(), command.userId());
+        getConnectorsUseCase.findAtStation(command.stationId(), command.chargerId());
+        if (reservationRepository.existsOverlapping(command.chargerId(),
+                List.of(ReservationStatus.CREATED, ReservationStatus.ACTIVE),
+                reservation.startTime(), reservation.expirationTime())) {
+            throw new ConnectorAlreadyReservedException();
+        }
         Reservation saved = reservationRepository.save(reservation);
         eventPublisher.ifAvailable(publisher -> publisher.reservationCreated(saved));
         return saved;

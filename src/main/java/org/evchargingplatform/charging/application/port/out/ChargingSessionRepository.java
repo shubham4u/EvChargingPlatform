@@ -16,4 +16,10 @@ public interface ChargingSessionRepository {
 
     void delete(ChargingSession chargingSession);
 
+    /** True if the connector has a session that is REQUESTED or ACTIVE. */
+    boolean existsOpenSessionForConnector(UUID connectorId);
+
+    /** True if the vehicle has a session that is REQUESTED or ACTIVE. */
+    boolean existsOpenSessionForVehicle(UUID vehicleId);
+
 }

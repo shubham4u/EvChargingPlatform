@@ -48,6 +48,8 @@ app:
     station-topic: ${STATION_EVENTS_TOPIC:station.events.v1}
     reservation-topic: ${RESERVATION_EVENTS_TOPIC:reservation.events.v1}
     charging-events-topic: ${CHARGING_EVENTS_TOPIC:charging.events.v1}
+    user-events-topic: ${USER_EVENTS_TOPIC:user.events.v1}
+    vehicle-events-topic: ${VEHICLE_EVENTS_TOPIC:vehicle.events.v1}
     consumer-group: ${KAFKA_CONSUMER_GROUP:station-service}
   # Bound by station/infrastructure/kafka/KafkaProperties: topics created at startup and the station publisher's topic.
   kafka:

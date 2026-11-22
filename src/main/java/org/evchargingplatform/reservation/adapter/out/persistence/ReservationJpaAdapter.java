@@ -51,6 +51,11 @@ public class ReservationJpaAdapter implements ReservationRepository {
                 .toList();
     }
 
+    @Override
+    public boolean existsOverlapping(UUID chargerId, Collection<ReservationStatus> statuses, Instant start, Instant end) {
+        return repository.existsByChargerIdAndStatusInAndStartTimeBeforeAndExpirationTimeAfter(chargerId, statuses, end, start);
+    }
+
     private ReservationEntity toEntity(Reservation r) {
         return new ReservationEntity(
                 r.id(), r.reservationNumber(), r.stationId(), r.chargerId(),
