@@ -9,15 +9,16 @@ import java.util.UUID;
 /**
  * User aggregate: a registered driver.
  * <p>
- * There is no authentication yet. Callers pass {@code userId} explicitly, and this aggregate
- * is the record other contexts check that id against. Email is normalised to lower case so
- * uniqueness does not depend on how the address was typed.
+ * Credentials live in Keycloak. This aggregate is the driver's profile: its {@code id} is the
+ * Keycloak subject ({@code sub}) of the account that registered it, so the access token and the
+ * profile always agree on who the user is. Email is normalised to lower case so uniqueness does
+ * not depend on how the address was typed.
  */
 public record User(UUID id, String email, String displayName, String phoneNumber, UserRole role,
         Instant createdAt) implements Serializable {
 
-    public static User register(String email, String displayName, String phoneNumber, Clock clock) {
-        return new User(UUID.randomUUID(), normaliseEmail(email), displayName.trim(), phoneNumber,
+    public static User register(UUID id, String email, String displayName, String phoneNumber, Clock clock) {
+        return new User(id, normaliseEmail(email), displayName.trim(), phoneNumber,
                 UserRole.DRIVER, Instant.now(clock));
     }
 

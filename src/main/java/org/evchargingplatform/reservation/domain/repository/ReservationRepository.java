@@ -23,6 +23,8 @@ public interface ReservationRepository {
 
     List<Reservation> findAll();
 
+    List<Reservation> findByUserId(UUID userId);
+
     List<Reservation> findExpired(Collection<ReservationStatus> statuses, Instant at);
 
     /** True if a reservation in one of {@code statuses} on the charger overlaps {@code [start, end)}. */

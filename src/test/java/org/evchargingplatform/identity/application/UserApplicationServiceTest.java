@@ -5,6 +5,7 @@ import org.evchargingplatform.identity.application.port.out.UserEventPublisher;
 import org.evchargingplatform.identity.application.port.out.UserRepository;
 import org.evchargingplatform.identity.domain.User;
 import org.evchargingplatform.identity.domain.exception.DuplicateUserException;
+import org.evchargingplatform.identity.domain.exception.UserAlreadyRegisteredException;
 import org.evchargingplatform.identity.domain.exception.UserNotFoundException;
 import org.evchargingplatform.support.TestObjectProvider;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,6 +31,7 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class UserApplicationServiceTest {
 
+    private static final UUID SUBJECT = UUID.randomUUID();
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-01-01T12:00:00Z"), ZoneOffset.UTC);
 
     @Mock
@@ -50,8 +52,9 @@ class UserApplicationServiceTest {
     void shouldRegisterUser() {
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        User result = service.register(new RegisterUserCommand("Alice@Example.com", "Alice", null));
+        User result = service.register(new RegisterUserCommand(SUBJECT, "Alice@Example.com", "Alice", null));
 
+        assertEquals(SUBJECT, result.id());
         assertEquals("alice@example.com", result.email());
         verify(eventPublisher).userRegistered(result);
     }
@@ -62,7 +65,7 @@ class UserApplicationServiceTest {
         when(userRepository.existsByEmail("alice@example.com")).thenReturn(true);
 
         assertThrows(DuplicateUserException.class,
-                () -> service.register(new RegisterUserCommand("ALICE@example.com", "Alice", null)));
+                () -> service.register(new RegisterUserCommand(SUBJECT, "ALICE@example.com", "Alice", null)));
         verify(userRepository, never()).save(any());
         verifyNoInteractions(eventPublisher);
     }
@@ -73,7 +76,25 @@ class UserApplicationServiceTest {
         service = new UserApplicationService(userRepository, TestObjectProvider.empty(), CLOCK);
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        assertDoesNotThrow(() -> service.register(new RegisterUserCommand("bob@example.com", "Bob", null)));
+        assertDoesNotThrow(() -> service.register(new RegisterUserCommand(SUBJECT, "bob@example.com", "Bob", null)));
+    }
+
+    @Test
+    @DisplayName("should reject a second profile for the same account")
+    void shouldRejectSecondProfile() {
+        when(userRepository.existsById(SUBJECT)).thenReturn(true);
+
+        assertThrows(UserAlreadyRegisteredException.class,
+                () -> service.register(new RegisterUserCommand(SUBJECT, "alice@example.com", "Alice", null)));
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("should reject an account without an email address")
+    void shouldRejectMissingEmail() {
+        assertThrows(IllegalArgumentException.class,
+                () -> service.register(new RegisterUserCommand(SUBJECT, null, "Alice", null)));
+        verify(userRepository, never()).save(any());
     }
 
     @Test

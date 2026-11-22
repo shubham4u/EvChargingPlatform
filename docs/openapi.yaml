@@ -5,22 +5,35 @@ info:
   description: >
     Driver journey: register a user, register their EV, find a station's connectors,
     optionally reserve one, start and stop a charging session. Errors are RFC 7807
-    problem details (see ProblemDetail). There is no authentication yet; user ids are
-    passed in request bodies and validated against registered users.
+    problem details (see ProblemDetail).
+
+    Authentication: send a Keycloak access token from realm ev-charging as
+    `Authorization: Bearer <token>`. The caller's user id is the token's `sub`; requests
+    never carry a userId. Drivers can only see and change their own resources;
+    operators (realm role `operator`) can see and act on everyone's and manage stations.
 servers:
   - url: http://localhost:8080
+security:
+  - bearerAuth: []
 paths:
-  /users:
+  /users/me:
     post:
-      summary: Register a driver
-      operationId: registerUser
+      summary: Create your profile from your login
+      description: >
+        Call once after signing up in Keycloak. The profile's id and email come from the token;
+        the body is optional and displayName defaults to the name on the account.
+      operationId: registerMe
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/RegisterUserRequest'
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '201':
           description: Created
           content:
@@ -28,13 +41,34 @@ paths:
               schema:
                 $ref: '#/components/schemas/UserResponse'
         '400':
-          $ref: '#/components/responses/ValidationFailed'
+          description: Validation failed, or the account has no email address
         '409':
-          description: User already exists (email, case-insensitive)
+          description: A profile already exists for this account, or the email is taken
     get:
-      summary: List users
+      summary: Get your profile
+      operationId: getMe
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '404':
+          description: No profile yet (call POST /users/me)
+  /users:
+    get:
+      summary: List users (operator)
       operationId: listUsers
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '200':
           description: OK
           content:
@@ -50,6 +84,10 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '200':
           description: OK
           content:
@@ -60,7 +98,7 @@ paths:
           description: User not found
   /vehicles:
     post:
-      summary: Register an EV to a user
+      summary: Register an EV to yourself
       operationId: registerVehicle
       requestBody:
         required: true
@@ -69,6 +107,10 @@ paths:
             schema:
               $ref: '#/components/schemas/RegisterVehicleRequest'
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '201':
           description: Created
           content:
@@ -78,11 +120,11 @@ paths:
         '400':
           $ref: '#/components/responses/ValidationFailed'
         '404':
-          description: Owner user not found
+          description: You have no profile yet (call POST /users/me)
         '409':
           description: Vehicle already registered (VIN)
     get:
-      summary: List vehicles, optionally for one owner
+      summary: List your vehicles (operators see all, optionally filtered by owner)
       operationId: listVehicles
       parameters:
         - name: ownerUserId
@@ -92,6 +134,10 @@ paths:
             type: string
             format: uuid
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '200':
           description: OK
           content:
@@ -101,7 +147,7 @@ paths:
                 items:
                   $ref: '#/components/schemas/VehicleResponse'
         '404':
-          description: Owner user not found (when ownerUserId is given)
+          description: Owner user not found
   /vehicles/{id}:
     get:
       summary: Get a vehicle
@@ -109,6 +155,10 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '200':
           description: OK
           content:
@@ -119,7 +169,7 @@ paths:
           description: Vehicle not found
   /stations:
     post:
-      summary: Create a station
+      summary: Create a station (operator)
       operationId: createStation
       requestBody:
         required: true
@@ -128,6 +178,10 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateStationRequest'
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '201':
           description: Created
           content:
@@ -141,6 +195,7 @@ paths:
     get:
       summary: List stations
       operationId: listStations
+      security: []
       responses:
         '200':
           description: OK
@@ -156,6 +211,7 @@ paths:
       operationId: getStation
       parameters:
         - $ref: '#/components/parameters/Id'
+      security: []
       responses:
         '200':
           description: OK
@@ -167,7 +223,7 @@ paths:
           description: Station not found
   /stations/{id}/connectors:
     post:
-      summary: Add a connector to a station
+      summary: Add a connector to a station (operator)
       operationId: addConnector
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -178,6 +234,10 @@ paths:
             schema:
               $ref: '#/components/schemas/AddConnectorRequest'
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '201':
           description: Created
           content:
@@ -193,6 +253,7 @@ paths:
       operationId: listConnectors
       parameters:
         - $ref: '#/components/parameters/Id'
+      security: []
       responses:
         '200':
           description: OK
@@ -215,6 +276,10 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateReservationRequest'
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '201':
           description: Created
           content:
@@ -228,9 +293,13 @@ paths:
         '409':
           description: Vehicle not owned by user, or connector already reserved for an overlapping window
     get:
-      summary: List reservations
+      summary: List your reservations (operators see all)
       operationId: listReservations
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '200':
           description: OK
           content:
@@ -246,6 +315,10 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '200':
           description: OK
           content:
@@ -261,6 +334,10 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '200':
           description: OK
           content:
@@ -278,6 +355,10 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '200':
           description: OK
           content:
@@ -299,6 +380,10 @@ paths:
             schema:
               $ref: '#/components/schemas/StartChargingRequest'
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '201':
           description: Created (session is ACTIVE)
           content:
@@ -314,9 +399,13 @@ paths:
             Vehicle not owned by user; connector in use (active session, or held by another
             reservation); vehicle already charging; or connector not reserved for the given reservation
     get:
-      summary: List charging sessions
+      summary: List your charging sessions (operators see all)
       operationId: listChargingSessions
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '200':
           description: OK
           content:
@@ -332,6 +421,10 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '200':
           description: OK
           content:
@@ -353,6 +446,10 @@ paths:
             schema:
               $ref: '#/components/schemas/StopChargingRequest'
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '200':
           description: OK (session is STOPPED)
           content:
@@ -366,6 +463,12 @@ paths:
         '409':
           description: Invalid state transition (session is not ACTIVE)
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token from Keycloak realm ev-charging, audience ev-platform-api.
   parameters:
     Id:
       name: id
@@ -375,6 +478,18 @@ components:
         type: string
         format: uuid
   responses:
+    Unauthorized:
+      description: Missing, expired or invalid token
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    Forbidden:
+      description: Authenticated, but not allowed (wrong role, or not your resource)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
     ValidationFailed:
       description: Validation failed
       content:
@@ -397,12 +512,7 @@ components:
           type: string
     RegisterUserRequest:
       type: object
-      required: [email, displayName]
       properties:
-        email:
-          type: string
-          format: email
-          maxLength: 254
         displayName:
           type: string
           maxLength: 100
@@ -430,11 +540,8 @@ components:
           format: date-time
     RegisterVehicleRequest:
       type: object
-      required: [ownerUserId, vin, make, model]
+      required: [vin, make, model]
       properties:
-        ownerUserId:
-          type: string
-          format: uuid
         vin:
           type: string
           pattern: '^[A-HJ-NPR-Za-hj-npr-z0-9]{17}$'
@@ -536,7 +643,7 @@ components:
       enum: [TYPE2, CCS2, CHADEMO, CCS1, NACS]
     CreateReservationRequest:
       type: object
-      required: [stationId, chargerId, userId, vehicleId, startTime]
+      required: [stationId, chargerId, vehicleId, startTime]
       properties:
         stationId:
           type: string
@@ -545,9 +652,6 @@ components:
           type: string
           format: uuid
           description: Connector id at the station.
-        userId:
-          type: string
-          format: uuid
         vehicleId:
           type: string
           format: uuid
@@ -592,15 +696,12 @@ components:
           format: date-time
     StartChargingRequest:
       type: object
-      required: [stationId, connectorId, userId, vehicleId]
+      required: [stationId, connectorId, vehicleId]
       properties:
         stationId:
           type: string
           format: uuid
         connectorId:
-          type: string
-          format: uuid
-        userId:
           type: string
           format: uuid
         vehicleId:

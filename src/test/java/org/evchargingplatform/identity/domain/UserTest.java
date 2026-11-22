@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -18,11 +19,12 @@ class UserTest {
     private static final Clock CLOCK = Clock.fixed(FIXED_NOW, ZoneOffset.UTC);
 
     @Test
-    @DisplayName("should register a DRIVER with a normalised email and trimmed name")
+    @DisplayName("should register a DRIVER under the account's subject, with a normalised email and trimmed name")
     void shouldRegisterDriver() {
-        User user = User.register("  Alice@Example.COM ", " Alice ", "+44 7700 900123", CLOCK);
+        UUID subject = UUID.randomUUID();
+        User user = User.register(subject, "  Alice@Example.COM ", " Alice ", "+44 7700 900123", CLOCK);
 
-        assertNotNull(user.id());
+        assertEquals(subject, user.id());
         assertEquals("alice@example.com", user.email());
         assertEquals("Alice", user.displayName());
         assertEquals("+44 7700 900123", user.phoneNumber());
@@ -33,6 +35,6 @@ class UserTest {
     @Test
     @DisplayName("should allow registering without a phone number")
     void shouldAllowMissingPhone() {
-        assertNull(User.register("bob@example.com", "Bob", null, CLOCK).phoneNumber());
+        assertNull(User.register(UUID.randomUUID(), "bob@example.com", "Bob", null, CLOCK).phoneNumber());
     }
 }

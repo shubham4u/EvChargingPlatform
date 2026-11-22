@@ -5,6 +5,7 @@ import org.evchargingplatform.charging.domain.exception.ConnectorInUseException;
 import org.evchargingplatform.charging.domain.exception.ConnectorNotReservedException;
 import org.evchargingplatform.charging.domain.exception.VehicleAlreadyChargingException;
 import org.evchargingplatform.identity.domain.exception.DuplicateUserException;
+import org.evchargingplatform.identity.domain.exception.UserAlreadyRegisteredException;
 import org.evchargingplatform.identity.domain.exception.UserNotFoundException;
 import org.evchargingplatform.reservation.domain.exception.ConnectorAlreadyReservedException;
 import org.evchargingplatform.reservation.domain.exception.ReservationAlreadyCancelledException;
@@ -19,6 +20,7 @@ import org.evchargingplatform.vehicle.domain.exception.VehicleNotFoundException;
 import org.evchargingplatform.vehicle.domain.exception.VehicleNotOwnedByUserException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -56,6 +58,11 @@ public class ApiExceptionHandler {
     @ExceptionHandler(DuplicateUserException.class)
     ProblemDetail handleDuplicateUser(DuplicateUserException exception) {
         return problem(HttpStatus.CONFLICT, "User already exists", exception.getMessage());
+    }
+
+    @ExceptionHandler(UserAlreadyRegisteredException.class)
+    ProblemDetail handleUserAlreadyRegistered(UserAlreadyRegisteredException exception) {
+        return problem(HttpStatus.CONFLICT, "User already registered", exception.getMessage());
     }
 
     // --- Vehicle exceptions ---
@@ -122,6 +129,13 @@ public class ApiExceptionHandler {
     @ExceptionHandler(VehicleAlreadyChargingException.class)
     ProblemDetail handleVehicleAlreadyCharging(VehicleAlreadyChargingException exception) {
         return problem(HttpStatus.CONFLICT, "Vehicle already charging", exception.getMessage());
+    }
+
+    // --- Security ---
+
+    @ExceptionHandler(AccessDeniedException.class)
+    ProblemDetail handleAccessDenied(AccessDeniedException exception) {
+        return problem(HttpStatus.FORBIDDEN, "Forbidden", exception.getMessage());
     }
 
     // --- Generic exceptions ---

@@ -8,6 +8,11 @@ data:
   KAFKA_BOOTSTRAP_SERVERS: kafka:9092
   KAFKA_ENABLED: "true"
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
+  # The issuer must match the "iss" Keycloak puts in tokens (its public URL); keys can be fetched in-cluster.
+  OIDC_ISSUER_URI: https://auth.example.com/realms/ev-charging
+  OIDC_JWK_SET_URI: http://keycloak:8080/realms/ev-charging/protocol/openid-connect/certs
+  OIDC_AUDIENCE: ev-platform-api
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:

@@ -11,6 +11,7 @@ import org.evchargingplatform.identity.application.port.out.UserEventPublisher;
 import org.evchargingplatform.identity.application.port.out.UserRepository;
 import org.evchargingplatform.identity.domain.User;
 import org.evchargingplatform.identity.domain.exception.DuplicateUserException;
+import org.evchargingplatform.identity.domain.exception.UserAlreadyRegisteredException;
 import org.evchargingplatform.identity.domain.exception.UserNotFoundException;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
@@ -37,12 +38,18 @@ public class UserApplicationService implements RegisterUserUseCase, GetUserUseCa
 
     @Override
     public User register(RegisterUserCommand command) {
+        if (userRepository.existsById(command.userId())) {
+            throw new UserAlreadyRegisteredException(command.userId());
+        }
+        if (command.email() == null || command.email().isBlank()) {
+            throw new IllegalArgumentException("Your account has no email address; add one in Keycloak first");
+        }
         String email = User.normaliseEmail(command.email());
         if (userRepository.existsByEmail(email)) {
             throw new DuplicateUserException(email);
         }
         User saved = userRepository.save(
-                User.register(email, command.displayName(), command.phoneNumber(), clock));
+                User.register(command.userId(), email, command.displayName(), command.phoneNumber(), clock));
         eventPublisher.ifAvailable(publisher -> publisher.userRegistered(saved));
         return saved;
     }

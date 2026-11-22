@@ -9,12 +9,15 @@ import org.evchargingplatform.reservation.application.port.in.GetReservationUseC
 import org.evchargingplatform.reservation.domain.Reservation;
 import org.evchargingplatform.reservation.domain.ReservationStatus;
 import org.evchargingplatform.reservation.domain.exception.ReservationNotFoundException;
+import org.evchargingplatform.shared.security.SecurityConfig;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -24,7 +27,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.evchargingplatform.support.TestJwt.driver;
+import static org.evchargingplatform.support.TestJwt.operator;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -33,9 +41,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Web layer tests for {@link ReservationController}.
  * <p>
  * Uses MockMvc with mocked use case interfaces to test
- * HTTP request/response mapping and error handling.
+ * HTTP request/response mapping, error handling, and who may call what.
  */
 @WebMvcTest(ReservationController.class)
+@Import(SecurityConfig.class)
 class ReservationControllerTest {
 
     @Autowired
@@ -59,6 +68,7 @@ class ReservationControllerTest {
     private static final UUID STATION_ID = UUID.randomUUID();
     private static final UUID CHARGER_ID = UUID.randomUUID();
     private static final UUID USER_ID = UUID.randomUUID();
+    private static final UUID OTHER_USER_ID = UUID.randomUUID();
     private static final UUID VEHICLE_ID = UUID.randomUUID();
 
     @Nested
@@ -66,26 +76,33 @@ class ReservationControllerTest {
     class CreateReservation {
 
         @Test
-        @DisplayName("should return 201 Created when request is valid")
+        @DisplayName("should return 201 Created and reserve as the token's user")
         void shouldReturn201WhenValid() throws Exception {
-            Reservation reservation = buildReservation(ReservationStatus.CREATED);
+            Reservation reservation = buildReservation(ReservationStatus.CREATED, USER_ID);
             when(createReservationUseCase.create(any(CreateReservationCommand.class))).thenReturn(reservation);
 
-            String body = objectMapper.writeValueAsString(Map.of(
-                    "stationId", STATION_ID.toString(),
-                    "chargerId", CHARGER_ID.toString(),
-                    "userId", USER_ID.toString(),
-                    "vehicleId", VEHICLE_ID.toString(),
-                    "startTime", Instant.now().plus(Duration.ofMinutes(5)).toString()));
-
-            mockMvc.perform(post("/reservations")
+            mockMvc.perform(post("/reservations").with(driver(USER_ID))
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content(body))
+                            .content(body(Instant.now().plus(Duration.ofMinutes(5)))))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.id").exists())
                     .andExpect(jsonPath("$.status").value("CREATED"))
                     .andExpect(jsonPath("$.stationId").value(STATION_ID.toString()))
                     .andExpect(jsonPath("$.reservationNumber").exists());
+
+            ArgumentCaptor<CreateReservationCommand> captor = ArgumentCaptor.forClass(CreateReservationCommand.class);
+            verify(createReservationUseCase).create(captor.capture());
+            assertEquals(USER_ID, captor.getValue().userId());
+        }
+
+        @Test
+        @DisplayName("should return 401 without a token")
+        void shouldReturn401WithoutToken() throws Exception {
+            mockMvc.perform(post("/reservations")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body(Instant.now().plus(Duration.ofMinutes(5)))))
+                    .andExpect(status().isUnauthorized());
+            verify(createReservationUseCase, never()).create(any());
         }
 
         @Test
@@ -93,11 +110,10 @@ class ReservationControllerTest {
         void shouldReturn400WhenStationIdMissing() throws Exception {
             String body = objectMapper.writeValueAsString(Map.of(
                     "chargerId", CHARGER_ID.toString(),
-                    "userId", USER_ID.toString(),
                     "vehicleId", VEHICLE_ID.toString(),
                     "startTime", Instant.now().plus(Duration.ofMinutes(5)).toString()));
 
-            mockMvc.perform(post("/reservations")
+            mockMvc.perform(post("/reservations").with(driver(USER_ID))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(body))
                     .andExpect(status().isBadRequest());
@@ -109,16 +125,9 @@ class ReservationControllerTest {
             when(createReservationUseCase.create(any(CreateReservationCommand.class)))
                     .thenThrow(new IllegalArgumentException("startTime must be in the future"));
 
-            String body = objectMapper.writeValueAsString(Map.of(
-                    "stationId", STATION_ID.toString(),
-                    "chargerId", CHARGER_ID.toString(),
-                    "userId", USER_ID.toString(),
-                    "vehicleId", VEHICLE_ID.toString(),
-                    "startTime", Instant.now().minus(Duration.ofMinutes(5)).toString()));
-
-            mockMvc.perform(post("/reservations")
+            mockMvc.perform(post("/reservations").with(driver(USER_ID))
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content(body))
+                            .content(body(Instant.now().minus(Duration.ofMinutes(5)))))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.title").value("Invalid request"));
         }
@@ -129,23 +138,23 @@ class ReservationControllerTest {
     class FindAll {
 
         @Test
-        @DisplayName("should return 200 OK with list of reservations")
-        void shouldReturn200WithList() throws Exception {
-            Reservation r1 = buildReservation(ReservationStatus.CREATED);
-            Reservation r2 = buildReservation(ReservationStatus.ACTIVE);
-            when(getReservationUseCase.findAll()).thenReturn(List.of(r1, r2));
+        @DisplayName("should list only the driver's own reservations")
+        void shouldListOwnForDriver() throws Exception {
+            when(getReservationUseCase.findByUser(USER_ID)).thenReturn(List.of(
+                    buildReservation(ReservationStatus.CREATED, USER_ID), buildReservation(ReservationStatus.ACTIVE, USER_ID)));
 
-            mockMvc.perform(get("/reservations"))
+            mockMvc.perform(get("/reservations").with(driver(USER_ID)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.length()").value(2));
+            verify(getReservationUseCase, never()).findAll();
         }
 
         @Test
-        @DisplayName("should return 200 OK with empty list")
-        void shouldReturn200WithEmptyList() throws Exception {
+        @DisplayName("should list every reservation for an operator")
+        void shouldListAllForOperator() throws Exception {
             when(getReservationUseCase.findAll()).thenReturn(List.of());
 
-            mockMvc.perform(get("/reservations"))
+            mockMvc.perform(get("/reservations").with(operator(UUID.randomUUID())))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.length()").value(0));
         }
@@ -156,15 +165,25 @@ class ReservationControllerTest {
     class FindById {
 
         @Test
-        @DisplayName("should return 200 OK when reservation exists")
+        @DisplayName("should return 200 OK for the owner")
         void shouldReturn200WhenFound() throws Exception {
-            Reservation reservation = buildReservation(ReservationStatus.CREATED);
+            Reservation reservation = buildReservation(ReservationStatus.CREATED, USER_ID);
             when(getReservationUseCase.findById(reservation.id())).thenReturn(reservation);
 
-            mockMvc.perform(get("/reservations/{id}", reservation.id()))
+            mockMvc.perform(get("/reservations/{id}", reservation.id()).with(driver(USER_ID)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.id").value(reservation.id().toString()))
                     .andExpect(jsonPath("$.status").value("CREATED"));
+        }
+
+        @Test
+        @DisplayName("should return 403 for another driver's reservation")
+        void shouldReturn403ForOthers() throws Exception {
+            Reservation reservation = buildReservation(ReservationStatus.CREATED, OTHER_USER_ID);
+            when(getReservationUseCase.findById(reservation.id())).thenReturn(reservation);
+
+            mockMvc.perform(get("/reservations/{id}", reservation.id()).with(driver(USER_ID)))
+                    .andExpect(status().isForbidden());
         }
 
         @Test
@@ -173,7 +192,7 @@ class ReservationControllerTest {
             UUID id = UUID.randomUUID();
             when(getReservationUseCase.findById(id)).thenThrow(new ReservationNotFoundException(id));
 
-            mockMvc.perform(get("/reservations/{id}", id))
+            mockMvc.perform(get("/reservations/{id}", id).with(driver(USER_ID)))
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.title").value("Reservation not found"));
         }
@@ -184,23 +203,36 @@ class ReservationControllerTest {
     class Cancel {
 
         @Test
-        @DisplayName("should return 200 OK when cancellation succeeds")
+        @DisplayName("should return 200 OK when the owner cancels")
         void shouldReturn200WhenCancelled() throws Exception {
-            Reservation cancelled = buildReservation(ReservationStatus.CANCELLED);
-            when(cancelReservationUseCase.cancel(cancelled.id())).thenReturn(cancelled);
+            Reservation created = buildReservation(ReservationStatus.CREATED, USER_ID);
+            when(getReservationUseCase.findById(created.id())).thenReturn(created);
+            when(cancelReservationUseCase.cancel(created.id())).thenReturn(buildReservation(ReservationStatus.CANCELLED, USER_ID));
 
-            mockMvc.perform(patch("/reservations/{id}/cancel", cancelled.id()))
+            mockMvc.perform(patch("/reservations/{id}/cancel", created.id()).with(driver(USER_ID)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.status").value("CANCELLED"));
         }
 
         @Test
+        @DisplayName("should return 403 and not cancel another driver's reservation")
+        void shouldReturn403ForOthers() throws Exception {
+            Reservation created = buildReservation(ReservationStatus.CREATED, OTHER_USER_ID);
+            when(getReservationUseCase.findById(created.id())).thenReturn(created);
+
+            mockMvc.perform(patch("/reservations/{id}/cancel", created.id()).with(driver(USER_ID)))
+                    .andExpect(status().isForbidden());
+            verify(cancelReservationUseCase, never()).cancel(any());
+        }
+
+        @Test
         @DisplayName("should return 409 Conflict when reservation is already terminal")
         void shouldReturn409WhenAlreadyTerminal() throws Exception {
-            UUID id = UUID.randomUUID();
-            when(cancelReservationUseCase.cancel(id)).thenThrow(new IllegalStateException("Reservation is terminal"));
+            Reservation cancelled = buildReservation(ReservationStatus.CANCELLED, USER_ID);
+            when(getReservationUseCase.findById(cancelled.id())).thenReturn(cancelled);
+            when(cancelReservationUseCase.cancel(cancelled.id())).thenThrow(new IllegalStateException("Reservation is terminal"));
 
-            mockMvc.perform(patch("/reservations/{id}/cancel", id))
+            mockMvc.perform(patch("/reservations/{id}/cancel", cancelled.id()).with(driver(USER_ID)))
                     .andExpect(status().isConflict())
                     .andExpect(jsonPath("$.title").value("Invalid state transition"));
         }
@@ -213,10 +245,11 @@ class ReservationControllerTest {
         @Test
         @DisplayName("should return 200 OK when completion succeeds")
         void shouldReturn200WhenCompleted() throws Exception {
-            Reservation completed = buildReservation(ReservationStatus.COMPLETED);
-            when(completeReservationUseCase.complete(completed.id())).thenReturn(completed);
+            Reservation active = buildReservation(ReservationStatus.ACTIVE, USER_ID);
+            when(getReservationUseCase.findById(active.id())).thenReturn(active);
+            when(completeReservationUseCase.complete(active.id())).thenReturn(buildReservation(ReservationStatus.COMPLETED, USER_ID));
 
-            mockMvc.perform(patch("/reservations/{id}/complete", completed.id()))
+            mockMvc.perform(patch("/reservations/{id}/complete", active.id()).with(driver(USER_ID)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.status").value("COMPLETED"));
         }
@@ -224,11 +257,12 @@ class ReservationControllerTest {
         @Test
         @DisplayName("should return 409 Conflict when reservation is not ACTIVE")
         void shouldReturn409WhenNotActive() throws Exception {
-            UUID id = UUID.randomUUID();
-            when(completeReservationUseCase.complete(id))
+            Reservation created = buildReservation(ReservationStatus.CREATED, USER_ID);
+            when(getReservationUseCase.findById(created.id())).thenReturn(created);
+            when(completeReservationUseCase.complete(created.id()))
                     .thenThrow(new IllegalStateException("Only active reservations can complete"));
 
-            mockMvc.perform(patch("/reservations/{id}/complete", id))
+            mockMvc.perform(patch("/reservations/{id}/complete", created.id()).with(driver(USER_ID)))
                     .andExpect(status().isConflict())
                     .andExpect(jsonPath("$.detail").value("Only active reservations can complete"));
         }
@@ -241,21 +275,30 @@ class ReservationControllerTest {
         @Test
         @DisplayName("should return 200 OK when cancellation via DELETE succeeds")
         void shouldReturn200WhenCancelledViaDelete() throws Exception {
-            Reservation cancelled = buildReservation(ReservationStatus.CANCELLED);
-            when(cancelReservationUseCase.cancel(cancelled.id())).thenReturn(cancelled);
+            Reservation created = buildReservation(ReservationStatus.CREATED, USER_ID);
+            when(getReservationUseCase.findById(created.id())).thenReturn(created);
+            when(cancelReservationUseCase.cancel(created.id())).thenReturn(buildReservation(ReservationStatus.CANCELLED, USER_ID));
 
-            mockMvc.perform(delete("/reservations/{id}", cancelled.id()))
+            mockMvc.perform(delete("/reservations/{id}", created.id()).with(driver(USER_ID)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.status").value("CANCELLED"));
         }
     }
 
-    private Reservation buildReservation(ReservationStatus status) {
+    private String body(Instant startTime) throws Exception {
+        return objectMapper.writeValueAsString(Map.of(
+                "stationId", STATION_ID.toString(),
+                "chargerId", CHARGER_ID.toString(),
+                "vehicleId", VEHICLE_ID.toString(),
+                "startTime", startTime.toString()));
+    }
+
+    private Reservation buildReservation(ReservationStatus status, UUID userId) {
         Instant now = Instant.now();
         return new Reservation(
                 UUID.randomUUID(),
                 "RSV-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(),
-                STATION_ID, CHARGER_ID, USER_ID, VEHICLE_ID,
+                STATION_ID, CHARGER_ID, userId, VEHICLE_ID,
                 now.plus(Duration.ofMinutes(5)),
                 now.plus(Duration.ofMinutes(15)),
                 status, now, now);

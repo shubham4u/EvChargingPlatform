@@ -29,6 +29,11 @@ public class ChargingSessionJpaAdapter implements ChargingSessionRepository {
     }
 
     @Override
+    public List<ChargingSession> findByUserId(UUID userId) {
+        return repository.findByUserIdOrderByCreatedAtDesc(userId).stream().map(this::toDomain).toList();
+    }
+
+    @Override
     public Optional<ChargingSession> findById(UUID id) {
         return repository.findById(id).map(this::toDomain);
     }

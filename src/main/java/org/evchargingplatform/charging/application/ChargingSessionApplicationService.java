@@ -87,6 +87,11 @@ StartChargingSessionUseCase, StopChargingSessionUseCase, GetChargingSessionUseCa
     }
 
     @Override
+    public List<ChargingSession> findByUser(UUID userId) {
+        return chargingSessionRepository.findByUserId(userId);
+    }
+
+    @Override
     public ChargingSession findById(UUID chargingSessionId) {
         return chargingSessionRepository.findById(chargingSessionId)
                 .orElseThrow(() -> new ChargingSessionNotFoundException(chargingSessionId));

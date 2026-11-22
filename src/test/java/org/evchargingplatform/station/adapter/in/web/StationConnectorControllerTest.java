@@ -5,6 +5,7 @@ import org.evchargingplatform.station.application.port.in.AddConnectorUseCase;
 import org.evchargingplatform.station.application.port.in.CreateStationUseCase;
 import org.evchargingplatform.station.application.port.in.GetConnectorsUseCase;
 import org.evchargingplatform.station.application.port.in.GetStationsUseCase;
+import org.evchargingplatform.shared.security.SecurityConfig;
 import org.evchargingplatform.station.domain.Connector;
 import org.evchargingplatform.station.domain.ConnectorType;
 import org.evchargingplatform.station.domain.exception.StationNotFoundException;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -20,7 +22,12 @@ import java.time.Clock;
 import java.util.List;
 import java.util.UUID;
 
+import static org.evchargingplatform.support.TestJwt.driver;
+import static org.evchargingplatform.support.TestJwt.operator;
+
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -29,6 +36,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Web layer tests for the connector endpoints on {@link StationController}.
  */
 @WebMvcTest(StationController.class)
+@Import(SecurityConfig.class)
 class StationConnectorControllerTest {
 
     private static final UUID STATION_ID = UUID.randomUUID();
@@ -55,7 +63,7 @@ class StationConnectorControllerTest {
     void shouldReturn201WhenValid() throws Exception {
         when(addConnectorUseCase.addConnector(any(AddConnectorCommand.class))).thenReturn(connector);
 
-        mockMvc.perform(post("/stations/{id}/connectors", STATION_ID)
+        mockMvc.perform(post("/stations/{id}/connectors", STATION_ID).with(operator(UUID.randomUUID()))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"connectorType\":\"CCS2\",\"maxPowerKw\":150}"))
                 .andExpect(status().isCreated())
@@ -68,11 +76,11 @@ class StationConnectorControllerTest {
     @Test
     @DisplayName("POST /stations/{id}/connectors should return 400 for a missing or invalid power rating")
     void shouldReturn400ForInvalidPower() throws Exception {
-        mockMvc.perform(post("/stations/{id}/connectors", STATION_ID)
+        mockMvc.perform(post("/stations/{id}/connectors", STATION_ID).with(operator(UUID.randomUUID()))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"connectorType\":\"CCS2\",\"maxPowerKw\":0}"))
                 .andExpect(status().isBadRequest());
-        mockMvc.perform(post("/stations/{id}/connectors", STATION_ID)
+        mockMvc.perform(post("/stations/{id}/connectors", STATION_ID).with(operator(UUID.randomUUID()))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"connectorType\":\"CCS2\"}"))
                 .andExpect(status().isBadRequest());
@@ -81,7 +89,7 @@ class StationConnectorControllerTest {
     @Test
     @DisplayName("POST /stations/{id}/connectors should return 400 for an unknown connector type")
     void shouldReturn400ForUnknownType() throws Exception {
-        mockMvc.perform(post("/stations/{id}/connectors", STATION_ID)
+        mockMvc.perform(post("/stations/{id}/connectors", STATION_ID).with(operator(UUID.randomUUID()))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"connectorType\":\"SCHUKO\",\"maxPowerKw\":3}"))
                 .andExpect(status().isBadRequest());
@@ -93,11 +101,21 @@ class StationConnectorControllerTest {
         when(addConnectorUseCase.addConnector(any(AddConnectorCommand.class)))
                 .thenThrow(new StationNotFoundException(STATION_ID));
 
-        mockMvc.perform(post("/stations/{id}/connectors", STATION_ID)
+        mockMvc.perform(post("/stations/{id}/connectors", STATION_ID).with(operator(UUID.randomUUID()))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"connectorType\":\"TYPE2\",\"maxPowerKw\":22}"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.title").value("Station not found"));
+    }
+
+    @Test
+    @DisplayName("POST /stations/{id}/connectors should be 403 for a driver")
+    void shouldRequireOperator() throws Exception {
+        mockMvc.perform(post("/stations/{id}/connectors", STATION_ID).with(driver(UUID.randomUUID()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"connectorType\":\"CCS2\",\"maxPowerKw\":150}"))
+                .andExpect(status().isForbidden());
+        verify(addConnectorUseCase, never()).addConnector(any());
     }
 
     @Test
