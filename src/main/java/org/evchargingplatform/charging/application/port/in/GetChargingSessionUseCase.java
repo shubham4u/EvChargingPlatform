@@ -8,6 +8,8 @@ import org.evchargingplatform.charging.domain.ChargingSession;
 public interface GetChargingSessionUseCase {
     List<ChargingSession> getAllChargingSessions();
 
+    List<ChargingSession> findByUser(UUID userId);
+
     ChargingSession findById(UUID chargingSessionId);
 
 }

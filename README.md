@@ -26,7 +26,9 @@ One Spring Boot application with five package-by-feature, hexagonal modules. Eac
 | `reservation` | Reserve a connector for a time window | `/reservations` |
 | `charging` | Start and stop charging sessions | `/charging/sessions` |
 
-A driver can register, add their EV, reserve a connector, start charging, and stop. Every reference is checked: you can't charge someone else's car, use a connector at the wrong station, take a connector that is busy or reserved by someone else, or charge one car twice at once. There is no login yet; user ids are passed in request bodies.
+A driver signs up, adds their EV, reserves a connector, starts charging, and stops. Every reference is checked: you can't charge someone else's car, use a connector at the wrong station, take a connector that is busy or reserved by someone else, or charge one car twice at once.
+
+**Login** is handled by Keycloak (OIDC); the API is an OAuth2 resource server. The caller's identity comes from the access token, never the request body. Drivers can only see and change their own things; operators manage stations and can see everything. Station browsing is public.
 
 ### Try the full journey
 
@@ -34,6 +36,8 @@ A driver can register, add their EV, reserve a connector, start charging, and st
 docker compose up --build -d
 .\scripts\demo-flow.ps1
 ```
+
+The script signs up three Keycloak accounts (two drivers, one operator) and runs the journey as them. To try it yourself, `.\scripts\new-user.ps1 -Name Alice` creates an account and gives you a token.
 
 See [API smoke test](docs/api-smoke-test.md) for the manual steps and [API design](docs/api-design.md) for every endpoint and error code.
 
@@ -78,14 +82,14 @@ Supporting docs are in the `docs/` folder:
 - [API smoke test](docs/api-smoke-test.md)
 - [Testing and fixes](docs/testing-and-fixes.md)
 - [Station service notes](docs/station-service.md)
-- Sprint notes: [2](docs/sprint-2-event-publishing.md) · [3](docs/sprint-3-reservation-service.md) · [4](docs/sprint-4-event-consumption.md) · [5](docs/sprint-5-charging-session-service.md) · [6](docs/sprint-6-users-vehicles-connectors.md)
+- Sprint notes: [2](docs/sprint-2-event-publishing.md) · [3](docs/sprint-3-reservation-service.md) · [4](docs/sprint-4-event-consumption.md) · [5](docs/sprint-5-charging-session-service.md) · [6](docs/sprint-6-users-vehicles-connectors.md) · [7](docs/sprint-7-authentication.md)
 
 ## Local development
 
 The application uses environment-based configuration for sensitive values. For local Docker Compose runs:
 
 1. Copy `.env.example` to `.env`.
-2. Set your local `POSTGRES_PASSWORD`.
+2. Set your local `POSTGRES_PASSWORD` and `KEYCLOAK_ADMIN_PASSWORD`.
 3. Start the stack with:
 
 ```powershell

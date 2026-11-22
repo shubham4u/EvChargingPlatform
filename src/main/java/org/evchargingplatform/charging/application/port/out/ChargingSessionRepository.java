@@ -10,6 +10,8 @@ public interface ChargingSessionRepository {
 
     List<ChargingSession> findAll();
 
+    List<ChargingSession> findByUserId(UUID userId);
+
     Optional<ChargingSession> findById(UUID id);
 
     ChargingSession save(ChargingSession chargingSession);

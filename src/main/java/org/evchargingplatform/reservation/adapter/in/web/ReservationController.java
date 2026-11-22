@@ -7,7 +7,11 @@ import org.evchargingplatform.reservation.application.port.in.CompleteReservatio
 import org.evchargingplatform.reservation.application.port.in.CreateReservationCommand;
 import org.evchargingplatform.reservation.application.port.in.CreateReservationUseCase;
 import org.evchargingplatform.reservation.application.port.in.GetReservationUseCase;
+import org.evchargingplatform.reservation.domain.Reservation;
+import org.evchargingplatform.shared.security.AuthenticatedUser;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -27,6 +31,8 @@ import java.util.UUID;
  * <p>
  * Depends on use case interfaces, not on the concrete application service.
  * Returns response DTOs to keep the domain model decoupled from the API contract.
+ * The reserving user is always the caller; reading or changing a reservation requires
+ * owning it or being an operator.
  */
 @RestController
 @RequestMapping("/reservations")
@@ -51,47 +57,57 @@ public class ReservationController {
     public record CreateRequest(
             @NotNull UUID stationId,
             @NotNull UUID chargerId,
-            @NotNull UUID userId,
             @NotNull UUID vehicleId,
             @NotNull Instant startTime) {
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public ReservationResponse create(@Valid @RequestBody CreateRequest request) {
+    public ReservationResponse create(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody CreateRequest request) {
         return ReservationResponse.from(createReservationUseCase.create(
                 new CreateReservationCommand(
                         request.stationId(),
                         request.chargerId(),
-                        request.userId(),
+                        AuthenticatedUser.from(jwt).id(),
                         request.vehicleId(),
                         request.startTime())));
     }
 
     @GetMapping
-    public List<ReservationResponse> findAll() {
-        return getReservationUseCase.findAll().stream()
-                .map(ReservationResponse::from)
-                .toList();
+    public List<ReservationResponse> findAll(@AuthenticationPrincipal Jwt jwt) {
+        AuthenticatedUser caller = AuthenticatedUser.from(jwt);
+        List<Reservation> reservations = caller.operator()
+                ? getReservationUseCase.findAll()
+                : getReservationUseCase.findByUser(caller.id());
+        return reservations.stream().map(ReservationResponse::from).toList();
     }
 
     @GetMapping("/{id}")
-    public ReservationResponse findById(@PathVariable UUID id) {
-        return ReservationResponse.from(getReservationUseCase.findById(id));
+    public ReservationResponse findById(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        return ReservationResponse.from(owned(jwt, id));
     }
 
     @DeleteMapping("/{id}")
-    public ReservationResponse cancel(@PathVariable UUID id) {
+    public ReservationResponse cancel(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        owned(jwt, id);
         return ReservationResponse.from(cancelReservationUseCase.cancel(id));
     }
 
     @PatchMapping("/{id}/cancel")
-    public ReservationResponse cancelPatch(@PathVariable UUID id) {
+    public ReservationResponse cancelPatch(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        owned(jwt, id);
         return ReservationResponse.from(cancelReservationUseCase.cancel(id));
     }
 
     @PatchMapping("/{id}/complete")
-    public ReservationResponse complete(@PathVariable UUID id) {
+    public ReservationResponse complete(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        owned(jwt, id);
         return ReservationResponse.from(completeReservationUseCase.complete(id));
+    }
+
+    private Reservation owned(Jwt jwt, UUID id) {
+        Reservation reservation = getReservationUseCase.findById(id);
+        AuthenticatedUser.from(jwt).requireOwnerOrOperator(reservation.userId());
+        return reservation;
     }
 }

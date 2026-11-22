@@ -11,6 +11,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.time.Clock;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -32,7 +33,7 @@ class UserJpaAdapterTest {
     @Test
     @DisplayName("should round-trip a user and find it by email")
     void shouldRoundTripUser() {
-        User user = User.register("alice@example.com", "Alice", "+44 7700 900123", Clock.systemUTC());
+        User user = User.register(UUID.randomUUID(), "alice@example.com", "Alice", "+44 7700 900123", Clock.systemUTC());
 
         adapter.save(user);
         entityManager.flush();

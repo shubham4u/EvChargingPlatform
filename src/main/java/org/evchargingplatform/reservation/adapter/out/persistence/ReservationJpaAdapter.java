@@ -44,6 +44,11 @@ public class ReservationJpaAdapter implements ReservationRepository {
     }
 
     @Override
+    public List<Reservation> findByUserId(UUID userId) {
+        return repository.findByUserIdOrderByStartTimeDesc(userId).stream().map(this::toDomain).toList();
+    }
+
+    @Override
     public List<Reservation> findExpired(Collection<ReservationStatus> statuses, Instant at) {
         return repository.findByStatusInAndExpirationTimeBefore(statuses, at)
                 .stream()

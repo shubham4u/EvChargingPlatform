@@ -11,5 +11,7 @@ import java.util.UUID;
 public interface GetReservationUseCase {
     List<Reservation> findAll();
 
+    List<Reservation> findByUser(UUID userId);
+
     Reservation findById(UUID reservationId);
 }

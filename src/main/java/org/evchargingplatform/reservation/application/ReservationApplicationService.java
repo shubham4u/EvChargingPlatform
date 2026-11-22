@@ -119,6 +119,12 @@ public class ReservationApplicationService implements
 
     @Override
     @Transactional(readOnly = true)
+    public List<Reservation> findByUser(UUID userId) {
+        return reservationRepository.findByUserId(userId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     @Cacheable(cacheNames = "reservations", key = "#reservationId")
     public Reservation findById(UUID reservationId) {
         return reservationRepository.findById(reservationId)

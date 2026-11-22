@@ -1,0 +1,79 @@
+{
+  "realm": "ev-charging",
+  "displayName": "EV Charging Platform",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "verifyEmail": false,
+  "bruteForceProtected": true,
+  "accessTokenLifespan": 900,
+  "roles": {
+    "realm": [
+      {
+        "name": "driver",
+        "description": "EV driver: own profile, vehicles, reservations and charging sessions. Granted to every account."
+      },
+      {
+        "name": "operator",
+        "description": "Charge point operator: creates stations and connectors, and can read and stop any driver's resources."
+      },
+      {
+        "name": "offline_access",
+        "description": "${role_offline-access}"
+      },
+      {
+        "name": "uma_authorization",
+        "description": "${role_uma_authorization}"
+      },
+      {
+        "name": "default-roles-ev-charging",
+        "description": "Roles every new account gets. The composites must be declared here: the importer ignores composites given under defaultRole.",
+        "composite": true,
+        "composites": {
+          "realm": ["offline_access", "uma_authorization", "driver"]
+        }
+      }
+    ]
+  },
+  "defaultRole": {
+    "name": "default-roles-ev-charging"
+  },
+  "clients": [
+    {
+      "clientId": "ev-cli",
+      "name": "EV platform scripts and local testing",
+      "description": "Public client for local development. Direct access grants (username + password) let scripts fetch tokens; a browser or mobile app should use the authorization code flow with PKCE instead.",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["http://localhost/*", "http://127.0.0.1/*"],
+      "webOrigins": ["+"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "+"
+      },
+      "defaultClientScopes": ["web-origins", "acr", "basic", "profile", "roles", "email"],
+      "optionalClientScopes": ["offline_access"],
+      "protocolMappers": [
+        {
+          "name": "audience: ev-platform-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "ev-platform-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ]
+}

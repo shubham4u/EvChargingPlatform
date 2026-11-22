@@ -8,6 +8,10 @@ import org.evchargingplatform.charging.application.port.in.GetChargingSessionUse
 import org.evchargingplatform.charging.application.port.in.StartChargingSessionCommand;
 import org.evchargingplatform.charging.application.port.in.StartChargingSessionUseCase;
 import org.evchargingplatform.charging.application.port.in.StopChargingSessionUseCase;
+import org.evchargingplatform.charging.domain.ChargingSession;
+import org.evchargingplatform.shared.security.AuthenticatedUser;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -21,10 +25,14 @@ import org.springframework.http.HttpStatus;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 
+/**
+ * REST adapter for charging sessions. The charging user is always the caller; stopping or
+ * reading a session requires owning it or being an operator.
+ */
 @RestController
 @RequestMapping("/charging/sessions")
 public class ChargingController {
-    
+
     private final StartChargingSessionUseCase startChargingSessionUseCase;
     private final StopChargingSessionUseCase stopChargingSessionUseCase;
     private final GetChargingSessionUseCase getChargingSessionUseCase;
@@ -41,7 +49,6 @@ public class ChargingController {
     public record StartRequest(
             @NotNull UUID stationId,
             @NotNull UUID connectorId,
-            @NotNull UUID userId,
             @NotNull UUID vehicleId,
             UUID reservationId) {   // no @NotNull — walk-up charging is valid
     }
@@ -51,30 +58,42 @@ public class ChargingController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public ChargingSessionResponse create(@Valid @RequestBody StartRequest request) {
+    public ChargingSessionResponse create(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody StartRequest request) {
         return ChargingSessionResponse.from(startChargingSessionUseCase.start(new StartChargingSessionCommand(
                 request.stationId(),
                 request.connectorId(),
-                request.userId(),
+                AuthenticatedUser.from(jwt).id(),
                 request.vehicleId(),
                 request.reservationId())));
     }
 
     @PatchMapping("/{id}/stop")
     @ResponseStatus(HttpStatus.OK)
-    public ChargingSessionResponse stop(@PathVariable UUID id, @Valid @RequestBody StopRequest request) {
+    public ChargingSessionResponse stop(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+                                        @Valid @RequestBody StopRequest request) {
+        owned(jwt, id);
         return ChargingSessionResponse.from(stopChargingSessionUseCase.stop(id, request.totalEnergyKwh()));
     }
 
     @GetMapping("/{id}")
-    public ChargingSessionResponse findById(@PathVariable UUID id) {
-        return ChargingSessionResponse.from(getChargingSessionUseCase.findById(id));
+    public ChargingSessionResponse findById(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        return ChargingSessionResponse.from(owned(jwt, id));
     }
 
     @GetMapping
-    public List<ChargingSessionResponse> findAll() {
-        return getChargingSessionUseCase.getAllChargingSessions().stream()
+    public List<ChargingSessionResponse> findAll(@AuthenticationPrincipal Jwt jwt) {
+        AuthenticatedUser caller = AuthenticatedUser.from(jwt);
+        List<ChargingSession> sessions = caller.operator()
+                ? getChargingSessionUseCase.getAllChargingSessions()
+                : getChargingSessionUseCase.findByUser(caller.id());
+        return sessions.stream()
                 .map(ChargingSessionResponse::from)
                 .toList();
+    }
+
+    private ChargingSession owned(Jwt jwt, UUID id) {
+        ChargingSession session = getChargingSessionUseCase.findById(id);
+        AuthenticatedUser.from(jwt).requireOwnerOrOperator(session.userId());
+        return session;
     }
 }
