@@ -3,10 +3,13 @@ package org.evchargingplatform.station.adapter.in.web;
 import org.evchargingplatform.station.application.port.in.AddConnectorCommand;
 import org.evchargingplatform.station.application.port.in.AddConnectorUseCase;
 import org.evchargingplatform.station.application.port.in.CreateStationUseCase;
-import org.evchargingplatform.station.application.port.in.GetConnectorsUseCase;
+import org.evchargingplatform.station.application.port.in.ConnectorStatus;
+import org.evchargingplatform.station.application.port.in.GetConnectorAvailabilityUseCase;
+import org.evchargingplatform.station.application.port.in.SearchStationsUseCase;
 import org.evchargingplatform.station.application.port.in.GetStationsUseCase;
 import org.evchargingplatform.shared.security.SecurityConfig;
 import org.evchargingplatform.station.domain.Connector;
+import org.evchargingplatform.station.domain.ConnectorAvailability;
 import org.evchargingplatform.station.domain.ConnectorType;
 import org.evchargingplatform.station.domain.exception.StationNotFoundException;
 import org.junit.jupiter.api.DisplayName;
@@ -54,7 +57,10 @@ class StationConnectorControllerTest {
     private AddConnectorUseCase addConnectorUseCase;
 
     @MockBean
-    private GetConnectorsUseCase getConnectorsUseCase;
+    private GetConnectorAvailabilityUseCase connectorAvailabilityUseCase;
+
+    @MockBean
+    private SearchStationsUseCase searchStationsUseCase;
 
     private final Connector connector = Connector.add(STATION_ID, ConnectorType.CCS2, 150, Clock.systemUTC());
 
@@ -70,7 +76,8 @@ class StationConnectorControllerTest {
                 .andExpect(jsonPath("$.id").value(connector.id().toString()))
                 .andExpect(jsonPath("$.stationId").value(STATION_ID.toString()))
                 .andExpect(jsonPath("$.connectorType").value("CCS2"))
-                .andExpect(jsonPath("$.maxPowerKw").value(150));
+                .andExpect(jsonPath("$.maxPowerKw").value(150))
+                .andExpect(jsonPath("$.status").value("AVAILABLE"));
     }
 
     @Test
@@ -121,11 +128,13 @@ class StationConnectorControllerTest {
     @Test
     @DisplayName("GET /stations/{id}/connectors should return 200 with the station's connectors")
     void shouldListConnectors() throws Exception {
-        when(getConnectorsUseCase.findByStation(STATION_ID)).thenReturn(List.of(connector));
+        when(connectorAvailabilityUseCase.findByStation(STATION_ID))
+                .thenReturn(List.of(new ConnectorStatus(connector, ConnectorAvailability.OCCUPIED)));
 
         mockMvc.perform(get("/stations/{id}/connectors", STATION_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].connectorType").value("CCS2"));
+                .andExpect(jsonPath("$[0].connectorType").value("CCS2"))
+                .andExpect(jsonPath("$[0].status").value("OCCUPIED"));
     }
 }

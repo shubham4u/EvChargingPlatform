@@ -1,5 +1,6 @@
 package org.evchargingplatform.station.application.port.out;
 
+import org.evchargingplatform.station.domain.GeoDistance.BoundingBox;
 import org.evchargingplatform.station.domain.Station;
 
 import java.util.List;
@@ -14,4 +15,8 @@ public interface StationRepository {
     Optional<Station> findById(UUID stationId);
 
     boolean existsByExternalReference(String externalReference);
+
+    List<Station> findActive();
+
+    List<Station> findActiveWithin(BoundingBox box);
 }

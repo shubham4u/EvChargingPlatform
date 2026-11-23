@@ -11,6 +11,8 @@ import org.evchargingplatform.charging.domain.exception.ConnectorNotReservedExce
 import org.evchargingplatform.charging.domain.exception.VehicleAlreadyChargingException;
 import org.evchargingplatform.identity.application.port.in.GetUserUseCase;
 import org.evchargingplatform.identity.domain.exception.UserNotFoundException;
+import org.evchargingplatform.reservation.application.port.in.ActivateReservationUseCase;
+import org.evchargingplatform.reservation.application.port.in.CompleteReservationUseCase;
 import org.evchargingplatform.station.application.port.in.GetConnectorsUseCase;
 import org.evchargingplatform.station.domain.exception.ConnectorNotFoundException;
 import org.evchargingplatform.station.application.port.out.ConnectorReservationProjectionRepository;
@@ -83,6 +85,12 @@ class ChargingSessionApplicationServiceTest {
     @Mock
     private GetConnectorsUseCase getConnectorsUseCase;
 
+    @Mock
+    private ActivateReservationUseCase activateReservationUseCase;
+
+    @Mock
+    private CompleteReservationUseCase completeReservationUseCase;
+
     private ChargingSessionApplicationService service;
 
     @BeforeEach
@@ -92,7 +100,8 @@ class ChargingSessionApplicationServiceTest {
 
     private ChargingSessionApplicationService newService(ObjectProvider<ChargingSessionEventPublisher> provider) {
         return new ChargingSessionApplicationService(chargingSessionRepository, provider, CLOCK, projectionRepository,
-                getUserUseCase, getVehicleUseCase, getConnectorsUseCase);
+                getUserUseCase, getVehicleUseCase, getConnectorsUseCase, activateReservationUseCase,
+                completeReservationUseCase);
     }
 
     /**
@@ -186,6 +195,7 @@ class ChargingSessionApplicationServiceTest {
             verify(getVehicleUseCase).findOwnedBy(VEHICLE_ID, USER_ID);
             verify(getConnectorsUseCase).findAtStation(STATION_ID, CONNECTOR_ID);
             verify(projectionRepository, never()).findByReservationId(any());
+            verifyNoInteractions(activateReservationUseCase);
         }
 
         @Test
@@ -199,6 +209,7 @@ class ChargingSessionApplicationServiceTest {
 
             assertEquals(ChargingSessionStatus.ACTIVE, result.status());
             assertEquals(RESERVATION_ID, result.reservationId());
+            verify(activateReservationUseCase).activate(RESERVATION_ID);
             verify(eventPublisher).sessionRequested(any(ChargingSession.class));
             verify(eventPublisher).sessionStarted(any(ChargingSession.class));
         }
@@ -346,6 +357,31 @@ class ChargingSessionApplicationServiceTest {
             ArgumentCaptor<ChargingSession> captor = ArgumentCaptor.forClass(ChargingSession.class);
             verify(eventPublisher).sessionStopped(captor.capture());
             assertEquals(totalEnergyKwh, captor.getValue().totalEnergyKwh());
+        }
+
+        @Test
+        @DisplayName("should complete the reservation when a reservation-backed session stops")
+        void shouldCompleteReservationOnStop() {
+            ChargingSession active = ChargingSession.create(STATION_ID, CONNECTOR_ID, USER_ID, VEHICLE_ID, RESERVATION_ID, CLOCK)
+                    .start(CLOCK);
+            when(chargingSessionRepository.findById(active.id())).thenReturn(Optional.of(active));
+            when(chargingSessionRepository.save(any(ChargingSession.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+            service.stop(active.id(), BigDecimal.ONE);
+
+            verify(completeReservationUseCase).completeIfActive(RESERVATION_ID);
+        }
+
+        @Test
+        @DisplayName("should not touch reservations when a walk-up session stops")
+        void shouldNotCompleteForWalkUp() {
+            ChargingSession active = createSession().start(CLOCK);
+            when(chargingSessionRepository.findById(active.id())).thenReturn(Optional.of(active));
+            when(chargingSessionRepository.save(any(ChargingSession.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+            service.stop(active.id(), BigDecimal.ONE);
+
+            verifyNoInteractions(completeReservationUseCase);
         }
 
         @Test

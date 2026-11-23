@@ -4,6 +4,7 @@ import org.evchargingplatform.station.application.port.out.ConnectorRepository;
 import org.evchargingplatform.station.domain.Connector;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -25,6 +26,14 @@ class ConnectorPersistenceAdapter implements ConnectorRepository {
     @Override
     public List<Connector> findByStationId(UUID stationId) {
         return repository.findByStationIdOrderByCreatedAt(stationId).stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public List<Connector> findByStationIds(Collection<UUID> stationIds) {
+        if (stationIds.isEmpty()) {
+            return List.of();
+        }
+        return repository.findByStationIdInOrderByCreatedAt(stationIds).stream().map(this::toDomain).toList();
     }
 
     @Override

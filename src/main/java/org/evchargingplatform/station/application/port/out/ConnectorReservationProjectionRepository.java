@@ -2,6 +2,7 @@ package org.evchargingplatform.station.application.port.out;
 
 import org.evchargingplatform.station.domain.ConnectorReservationProjection;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -22,5 +23,8 @@ public interface ConnectorReservationProjectionRepository {
             ConnectorReservationProjection.ReservationProjectionStatus status);
 
     boolean existsByReservationId(UUID reservationId);
+
+    List<ConnectorReservationProjection> findByConnectorIdsAndStatus(Collection<UUID> connectorIds,
+            ConnectorReservationProjection.ReservationProjectionStatus status);
 
 }

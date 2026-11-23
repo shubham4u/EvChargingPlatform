@@ -64,6 +64,19 @@ function ExpectError($label, $expectedStatus, $result) {
 # Windows PowerShell 5.1 emits a JSON array as one pipeline object, so @(...).Count is wrong there.
 function Count($items) { return ($items | Measure-Object).Count }
 
+# Availability comes from read models fed by Kafka, so give events a moment to land before failing.
+function WaitFor($label, [scriptblock]$condition) {
+    for ($i = 0; $i -lt 20; $i++) {
+        if (& $condition) { Check $label $true; return }
+        Start-Sleep -Milliseconds 500
+    }
+    Check $label $false
+}
+
+function ConnectorStatus($stationId, $connectorId) {
+    (Api $null Get "/stations/$stationId/connectors" | ForEach-Object { $_ } | Where-Object { $_.id -eq $connectorId }).status
+}
+
 function New-Account($name, [switch]$Operator) {
     $username = "$($name.ToLower())-$($suffix.ToLower())"
     $password = [guid]::NewGuid().ToString()
@@ -104,12 +117,28 @@ ExpectError "Bob reading Alice's car" 403 (ApiError $bob.Token Get "/vehicles/$(
 
 Step "4. Only an operator can set up stations"
 ExpectError "Alice creating a station" 403 (ApiError $alice.Token Post "/stations" @{ externalReference = "ST-X-$suffix"; name = "Nope"; countryCode = "GB"; latitude = 51.5; longitude = -0.1 })
-$station = Api $olivia.Token Post "/stations" @{ externalReference = "ST-$suffix"; name = "Kings Cross Hub $suffix"; countryCode = "GB"; latitude = 51.5308; longitude = -0.1238 }
+# A random spot in London each run, so stations left by earlier runs don't crowd the search results.
+$lat = [math]::Round(51.45 + (Get-Random -Maximum 1500) / 10000, 6)
+$lng = [math]::Round(-0.25 + (Get-Random -Maximum 3000) / 10000, 6)
+$station = Api $olivia.Token Post "/stations" @{ externalReference = "ST-$suffix"; name = "Kings Cross Hub $suffix"; countryCode = "GB"; latitude = $lat; longitude = $lng }
 $ccs = Api $olivia.Token Post "/stations/$($station.id)/connectors" @{ connectorType = "CCS2"; maxPowerKw = 150 }
 $type2 = Api $olivia.Token Post "/stations/$($station.id)/connectors" @{ connectorType = "TYPE2"; maxPowerKw = 22 }
 Write-Host "  station $($station.id)  $($station.name)"
 Write-Host "  CCS2    $($ccs.id)  150 kW   TYPE2 $($type2.id)  22 kW"
 Check "anyone can list the 2 connectors" ((Count (Api $null Get "/stations/$($station.id)/connectors")) -eq 2)
+
+Step "4b. A driver searches for a fast CCS2 charger nearby (no login needed)"
+# 300 m north of the station, as if searching from the street
+$searchLat = $lat + 0.0027
+$found = Api $null Get "/stations/search?lat=$searchLat&lng=$lng&radiusKm=1&connectorType=CCS2&minPowerKw=100&limit=100" | ForEach-Object { $_ } | Where-Object { $_.id -eq $station.id }
+Write-Host "  found   $($found.name)  $($found.distanceKm) km away  $($found.availableConnectors) available"
+Check "search finds the station about 0.3 km away" ($null -ne $found -and [math]::Abs($found.distanceKm - 0.3) -lt 0.05)
+Check "only the matching CCS2 150 kW connector is listed, AVAILABLE" ((Count $found.connectors) -eq 1 -and $found.connectors[0].id -eq $ccs.id -and $found.connectors[0].status -eq "AVAILABLE")
+$tooSlow = Api $null Get "/stations/search?lat=$searchLat&lng=$lng&radiusKm=1&connectorType=CCS2&minPowerKw=200&limit=100" | ForEach-Object { $_ } | Where-Object { $_.id -eq $station.id }
+Check "asking for 200 kW excludes it" ($null -eq $tooSlow)
+$farAway = Api $null Get "/stations/search?lat=48.8809&lng=2.3553&radiusKm=50&limit=100" | ForEach-Object { $_ } | Where-Object { $_.id -eq $station.id }
+Check "searching from Paris excludes it" ($null -eq $farAway)
+ExpectError "search with half a location" 400 (ApiError $null Get "/stations/search?lat=51.5" $null)
 
 Step "5. Alice reserves the CCS2 connector"
 $reservation = Api $alice.Token Post "/reservations" @{ stationId = $station.id; chargerId = $ccs.id; vehicleId = $car.id; startTime = (Get-Date).ToUniversalTime().AddMinutes(1).ToString("o") }
@@ -118,6 +147,7 @@ Check "reservation CREATED for Alice" ($reservation.status -eq "CREATED" -and $r
 ExpectError "overlapping reservation on same connector" 409 (ApiError $alice.Token Post "/reservations" @{ stationId = $station.id; chargerId = $ccs.id; vehicleId = $car.id; startTime = (Get-Date).ToUniversalTime().AddMinutes(2).ToString("o") })
 ExpectError "Bob reading Alice's reservation" 403 (ApiError $bob.Token Get "/reservations/$($reservation.id)")
 ExpectError "Bob cancelling Alice's reservation" 403 (ApiError $bob.Token Patch "/reservations/$($reservation.id)/cancel" $null)
+WaitFor "CCS2 connector now shows RESERVED" { (ConnectorStatus $station.id $ccs.id) -eq "RESERVED" }
 
 Step "6. Bob signs up; he can't use Alice's car or her reserved connector"
 Api $bob.Token Post "/users/me" @{} | Out-Null
@@ -136,6 +166,8 @@ Step "7. Alice plugs in and starts charging against her reservation"
 $session = Api $alice.Token Post "/charging/sessions" @{ stationId = $station.id; connectorId = $ccs.id; vehicleId = $car.id; reservationId = $reservation.id }
 Write-Host "  session $($session.id)  $($session.chargingSessionNumber)  $($session.status)"
 Check "session ACTIVE for Alice, linked to her reservation" ($session.status -eq "ACTIVE" -and $session.userId -eq $alice.Id -and $session.reservationId -eq $reservation.id)
+WaitFor "CCS2 connector now shows OCCUPIED" { (ConnectorStatus $station.id $ccs.id) -eq "OCCUPIED" }
+Check "her reservation is now ACTIVE" ((Api $alice.Token Get "/reservations/$($reservation.id)").status -eq "ACTIVE")
 ExpectError "same car starting a second session" 409 (ApiError $alice.Token Post "/charging/sessions" @{ stationId = $station.id; connectorId = $type2.id; vehicleId = $car.id })
 
 Step "8. Bob charges on the free TYPE2 connector at the same time"
@@ -143,17 +175,26 @@ $bobSession = Api $bob.Token Post "/charging/sessions" @{ stationId = $station.i
 Check "Bob's walk-up session ACTIVE" ($bobSession.status -eq "ACTIVE")
 ExpectError "Bob stopping Alice's session" 403 (ApiError $bob.Token Patch "/charging/sessions/$($session.id)/stop" @{ totalEnergyKwh = 1 })
 Check "Bob sees only his own session" ((Count (Api $bob.Token Get "/charging/sessions")) -eq 1)
+WaitFor "search with available=true no longer offers this station" {
+    $null -eq (Api $null Get "/stations/search?lat=$lat&lng=$lng&radiusKm=1&available=true&limit=100" | ForEach-Object { $_ } | Where-Object { $_.id -eq $station.id })
+}
 
 Step "9. Alice unplugs"
 $stopped = Api $alice.Token Patch "/charging/sessions/$($session.id)/stop" @{ totalEnergyKwh = 42.75 }
 Write-Host "  session $($stopped.id)  $($stopped.status)  $($stopped.totalEnergyKwh) kWh"
 Check "session STOPPED with 42.75 kWh" ($stopped.status -eq "STOPPED" -and [decimal]$stopped.totalEnergyKwh -eq [decimal]42.75)
 ExpectError "stopping twice" 409 (ApiError $alice.Token Patch "/charging/sessions/$($session.id)/stop" @{ totalEnergyKwh = 1 })
+Check "her reservation is COMPLETED" ((Api $alice.Token Get "/reservations/$($reservation.id)").status -eq "COMPLETED")
+WaitFor "CCS2 connector is AVAILABLE again (not left RESERVED)" { (ConnectorStatus $station.id $ccs.id) -eq "AVAILABLE" }
 
 Step "10. The operator can see and act on everything; drivers can't"
 Check "Olivia sees both sessions at her new station" ((Count (Api $olivia.Token Get "/charging/sessions" | ForEach-Object { $_ } | Where-Object { $_.stationId -eq $station.id })) -eq 2)
 $bobStopped = Api $olivia.Token Patch "/charging/sessions/$($bobSession.id)/stop" @{ totalEnergyKwh = 7.5 }
 Check "Olivia stops Bob's session" ($bobStopped.status -eq "STOPPED")
+WaitFor "both connectors AVAILABLE, and search offers the station again" {
+    $s = Api $null Get "/stations/search?lat=$lat&lng=$lng&radiusKm=1&available=true&limit=100" | ForEach-Object { $_ } | Where-Object { $_.id -eq $station.id }
+    $null -ne $s -and $s.availableConnectors -eq 2
+}
 Check "Olivia can list users" ((Count (Api $olivia.Token Get "/users")) -ge 2)
 ExpectError "Alice listing all users" 403 (ApiError $alice.Token Get "/users")
 

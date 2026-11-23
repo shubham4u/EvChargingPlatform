@@ -1,6 +1,7 @@
 package org.evchargingplatform.reservation.application;
 
 import org.evchargingplatform.identity.application.port.in.GetUserUseCase;
+import org.evchargingplatform.reservation.application.port.in.ActivateReservationUseCase;
 import org.evchargingplatform.reservation.application.port.in.CancelReservationUseCase;
 import org.evchargingplatform.reservation.application.port.in.CompleteReservationUseCase;
 import org.evchargingplatform.reservation.application.port.in.CreateReservationCommand;
@@ -25,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -37,11 +39,16 @@ import java.util.UUID;
  * connector at the station, through each owning context's query use case in-process. It then
  * refuses a reservation whose time window overlaps an open (CREATED or ACTIVE) one on the same
  * charger.
+ * <p>
+ * Sprint 8: Charging activates a reservation when its session starts and completes it when the session
+ * stops. Only CREATED reservations expire, meaning nobody turned up. An ACTIVE one is in use, and
+ * expiring it mid-charge would leave the completion with nothing to complete.
  */
 @Service
 @Transactional
 public class ReservationApplicationService implements
         CreateReservationUseCase,
+        ActivateReservationUseCase,
         CancelReservationUseCase,
         CompleteReservationUseCase,
         GetReservationUseCase,
@@ -93,6 +100,13 @@ public class ReservationApplicationService implements
 
     @Override
     @CacheEvict(cacheNames = "reservations", key = "#reservationId")
+    public Reservation activate(UUID reservationId) {
+        Reservation reservation = findById(reservationId);
+        return reservationRepository.save(reservation.activate(clock));
+    }
+
+    @Override
+    @CacheEvict(cacheNames = "reservations", key = "#reservationId")
     public Reservation cancel(UUID reservationId) {
         Reservation reservation = findById(reservationId);
         Reservation cancelled = reservation.cancel(clock);
@@ -109,6 +123,18 @@ public class ReservationApplicationService implements
         Reservation saved = reservationRepository.save(completed);
         eventPublisher.ifAvailable(publisher -> publisher.reservationCompleted(saved));
         return saved;
+    }
+
+    @Override
+    @CacheEvict(cacheNames = "reservations", key = "#reservationId")
+    public Optional<Reservation> completeIfActive(UUID reservationId) {
+        Reservation reservation = findById(reservationId);
+        if (reservation.status() != ReservationStatus.ACTIVE) {
+            return Optional.empty();
+        }
+        Reservation saved = reservationRepository.save(reservation.complete(clock));
+        eventPublisher.ifAvailable(publisher -> publisher.reservationCompleted(saved));
+        return Optional.of(saved);
     }
 
     @Override
@@ -135,8 +161,7 @@ public class ReservationApplicationService implements
     @Scheduled(fixedDelayString = "${reservation.expiration.poll-ms:60000}")
     public void expireReservations() {
         Instant now = Instant.now(clock);
-        List<Reservation> expired = reservationRepository.findExpired(
-                List.of(ReservationStatus.CREATED, ReservationStatus.ACTIVE), now);
+        List<Reservation> expired = reservationRepository.findExpired(List.of(ReservationStatus.CREATED), now);
         for (Reservation reservation : expired) {
             Reservation expiredReservation = reservation.expire(clock);
             Reservation saved = reservationRepository.save(expiredReservation);

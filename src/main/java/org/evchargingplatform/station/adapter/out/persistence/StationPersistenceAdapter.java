@@ -1,9 +1,12 @@
 package org.evchargingplatform.station.adapter.out.persistence;
 
 import org.evchargingplatform.station.application.port.out.StationRepository;
+import org.evchargingplatform.station.domain.GeoDistance.BoundingBox;
 import org.evchargingplatform.station.domain.Station;
+import org.evchargingplatform.station.domain.StationStatus;
 import org.springframework.stereotype.Repository;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -35,6 +38,19 @@ class StationPersistenceAdapter implements StationRepository {
     @Override
     public boolean existsByExternalReference(String externalReference) {
         return repository.existsByExternalReference(externalReference);
+    }
+
+    @Override
+    public List<Station> findActive() {
+        return repository.findByStatus(StationStatus.ACTIVE).stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public List<Station> findActiveWithin(BoundingBox box) {
+        return repository.findByStatusAndLatitudeBetweenAndLongitudeBetween(StationStatus.ACTIVE,
+                        BigDecimal.valueOf(box.minLat()), BigDecimal.valueOf(box.maxLat()),
+                        BigDecimal.valueOf(box.minLng()), BigDecimal.valueOf(box.maxLng()))
+                .stream().map(this::toDomain).toList();
     }
 
     private StationJpaEntity toEntity(Station station) {

@@ -6,6 +6,7 @@ import org.evchargingplatform.station.infrastructure.persistence.ConnectorReserv
 import org.evchargingplatform.station.infrastructure.persistence.SpringDataConnectorReservationProjectionRepository;
 import org.springframework.stereotype.Component;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -46,6 +47,15 @@ public class ConnectorReservationProjectionAdapter implements ConnectorReservati
     @Override
     public boolean existsByReservationId(UUID reservationId) {
         return repository.existsById(reservationId);
+    }
+
+    @Override
+    public List<ConnectorReservationProjection> findByConnectorIdsAndStatus(
+            Collection<UUID> connectorIds, ConnectorReservationProjection.ReservationProjectionStatus status) {
+        if (connectorIds.isEmpty()) {
+            return List.of();
+        }
+        return repository.findByConnectorIdInAndStatus(connectorIds, status).stream().map(this::toDomain).toList();
     }
 
     private ConnectorReservationProjectionEntity toEntity(ConnectorReservationProjection p) {
