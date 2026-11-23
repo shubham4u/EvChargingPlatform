@@ -12,6 +12,7 @@ import org.evchargingplatform.payments.infrastructure.persistence.PaymentMethodJ
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -57,6 +58,14 @@ public class PaymentJpaAdapter implements PaymentIntentRepository, PaymentMethod
     @Override
     public List<PaymentIntent> findAll() {
         return intents.findAll(Sort.by(Sort.Direction.DESC, "createdAt")).stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public List<PaymentIntent> findBySessionIds(Collection<UUID> sessionIds) {
+        if (sessionIds.isEmpty()) {
+            return List.of();
+        }
+        return intents.findBySessionIdIn(sessionIds).stream().map(this::toDomain).toList();
     }
 
     @Override

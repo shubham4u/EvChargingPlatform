@@ -2,6 +2,7 @@ package org.evchargingplatform.payments.application.port.out;
 
 import org.evchargingplatform.payments.domain.PaymentIntent;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -17,4 +18,6 @@ public interface PaymentIntentRepository {
     List<PaymentIntent> findByUserId(UUID userId);
 
     List<PaymentIntent> findAll();
+
+    List<PaymentIntent> findBySessionIds(Collection<UUID> sessionIds);
 }

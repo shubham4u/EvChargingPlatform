@@ -16,7 +16,8 @@ public record PaymentAuthorizedEvent(
         UUID sessionId,
         BigDecimal amountMinor,
         String currency,
-        String providerReference
+        String providerReference,
+        UUID userId     // added in Sprint 10 so consumers needn't look the payment up
 ) implements DomainEvent {
     public static final int VERSION = 1;
 }

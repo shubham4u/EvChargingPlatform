@@ -37,6 +37,8 @@ Getting a token locally (dev only, the `ev-cli` client allows username + passwor
 | `PUT /payments/methods/me`, `GET /payments/methods/me` | 401 | self | self |
 | `GET /payments`, `GET /payments/{id}` | 401 | own | ✅ all |
 | `POST /payments/{id}/refund` | 401 | 403 | ✅ |
+| `GET /notifications`, `PATCH /notifications/{id}/read` | 401 | own | own |
+| `GET /audit/events`, `GET /reports/stations/{id}` | 401 | 403 | ✅ |
 | `GET /charging/sessions/{id}`, `PATCH /charging/sessions/{id}/stop` | 401 | own only | ✅ |
 
 ## Endpoints
@@ -61,6 +63,9 @@ Getting a token locally (dev only, the `ev-cli` client allows username + passwor
 - `PUT /stations/{id}/tariff` (operator) — set prices; `GET /stations/{id}/tariff` — current prices (public)
 - `PUT /payments/methods/me` — save your card token; `GET /payments/methods/me`
 - `GET /payments`, `GET /payments/{id}`; `POST /payments/{id}/refund` (operator)
+- `GET /notifications[?unread=true]`, `PATCH /notifications/{id}/read` — your inbox
+- `GET /audit/events?key=&type=&traceId=&limit=` (operator) — the event history
+- `GET /reports/stations/{id}?from=&to=` (operator) — usage and money for a period (default: last 30 days)
 
 Charging follows the Reservation convention (`POST` the collection to create, `PATCH /{id}/<transition>` for state changes) rather than the verb-style `POST /charging/start` / `POST /charging/stop` originally planned here — see Decision 2 in `sprint-5-charging-session-service.md`.
 
@@ -123,6 +128,22 @@ Drivers save a card once with `PUT /payments/methods/me` and `{ "token": "tok_vi
 | Refund (operator) | `POST /payments/{id}/refund` refunds a `CAPTURED` payment in full | Anything else → `409` |
 
 The session response now includes `tariffId`, `totalCost` and `currency`. Payment events (`PaymentAuthorized`, `PaymentCaptured`, `PaymentFailed`, `PaymentRefunded`) go to `payment.events.v1`, keyed by session id, with amounts in minor units.
+
+### Notifications, audit and reports
+
+**Notifications.** Drivers get an inbox entry, also passed to a delivery port (a logging stand-in for email or push), for: reservation confirmed, cancelled or expired; charging started or finished; payment received; card declined ("charging didn't start"); payment failed ("please update your card"); and refund issued. They are built only from Kafka events, each at most once.
+
+**Audit.** Every event on every `*.events.v1` topic is stored exactly as published, with its type, key and the W3C **trace id** it was published under. `GET /audit/events?key=<sessionId>` lists everything that happened to a session. For example:
+
+```
+PaymentAuthorized → ChargingSessionRequested → ChargingSessionStarted   (trace A: POST /charging/sessions)
+PaymentCaptured → ChargingSessionStopped                                (trace B: PATCH …/stop)
+PaymentRefunded                                                         (trace C: POST /payments/{id}/refund)
+```
+
+Open a trace id in Jaeger (http://localhost:16686/trace/&lt;traceId&gt;) to see the HTTP request and every event it published.
+
+**Reports.** `GET /reports/stations/{id}` returns `sessions`, `activeSessions`, `paidSessions`, `paymentFailures`, `energyKwh`, `billed`, `revenue` (captured minus refunds), `refunded`, `outstanding` (the cost of `PAYMENT_FAILED` sessions) and `currency`.
 
 ### Reservation rules
 

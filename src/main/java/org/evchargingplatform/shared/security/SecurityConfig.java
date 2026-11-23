@@ -41,6 +41,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/stations", "/stations/*/connectors").hasRole("OPERATOR")
                         .requestMatchers(HttpMethod.PUT, "/stations/*/tariff").hasRole("OPERATOR")
                         .requestMatchers(HttpMethod.POST, "/payments/*/refund").hasRole("OPERATOR")
+                        .requestMatchers("/audit/**", "/reports/**").hasRole("OPERATOR")
                         .requestMatchers(HttpMethod.GET, "/users").hasRole("OPERATOR")
                         .requestMatchers("/error").permitAll()
                         .anyRequest().authenticated())

@@ -39,25 +39,27 @@ public class KafkaPaymentEventPublisher implements PaymentEventPublisher {
     @Override
     public void paymentAuthorized(PaymentIntent p) {
         send(p, new PaymentAuthorizedEvent(UUID.randomUUID(), PaymentAuthorizedEvent.VERSION, UUID.randomUUID(), null,
-                Instant.now(), p.id(), p.sessionId(), minor(p.authorizedAmount()), p.currency(), p.providerReference()));
+                Instant.now(), p.id(), p.sessionId(), minor(p.authorizedAmount()), p.currency(), p.providerReference(), p.userId()));
     }
 
     @Override
     public void paymentCaptured(PaymentIntent p) {
         send(p, new PaymentCapturedEvent(UUID.randomUUID(), PaymentCapturedEvent.VERSION, UUID.randomUUID(), null,
-                Instant.now(), p.id(), p.sessionId(), minor(p.capturedAmount()), p.currency(), p.providerReference()));
+                Instant.now(), p.id(), p.sessionId(), minor(p.capturedAmount()), p.currency(), p.providerReference(),
+                p.userId()));
     }
 
     @Override
     public void paymentFailed(PaymentIntent p) {
         send(p, new PaymentFailedEvent(UUID.randomUUID(), PaymentFailedEvent.VERSION, UUID.randomUUID(), null,
-                Instant.now(), p.id(), p.sessionId(), p.failureCode(), p.failureReason()));
+                Instant.now(), p.id(), p.sessionId(), p.failureCode(), p.failureReason(), p.userId()));
     }
 
     @Override
     public void paymentRefunded(PaymentIntent p) {
         send(p, new PaymentRefundedEvent(UUID.randomUUID(), PaymentRefundedEvent.VERSION, UUID.randomUUID(), null,
-                Instant.now(), p.id(), p.sessionId(), minor(p.capturedAmount()), p.currency(), p.providerReference()));
+                Instant.now(), p.id(), p.sessionId(), minor(p.capturedAmount()), p.currency(), p.providerReference(),
+                p.userId()));
     }
 
     private void send(PaymentIntent p, Object event) {
