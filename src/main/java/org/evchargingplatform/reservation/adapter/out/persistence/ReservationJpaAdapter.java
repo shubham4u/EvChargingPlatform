@@ -5,11 +5,14 @@ import org.evchargingplatform.reservation.domain.ReservationStatus;
 import org.evchargingplatform.reservation.domain.repository.ReservationRepository;
 import org.evchargingplatform.reservation.infrastructure.persistence.ReservationEntity;
 import org.evchargingplatform.reservation.infrastructure.persistence.ReservationJpaRepository;
+import org.evchargingplatform.reservation.domain.exception.ConnectorAlreadyReservedException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -30,7 +33,16 @@ public class ReservationJpaAdapter implements ReservationRepository {
 
     @Override
     public Reservation save(Reservation reservation) {
-        return toDomain(repository.save(toEntity(reservation)));
+        // Flush now so a lost race on the overlap exclusion constraint (V14, Postgres) surfaces as the usual 409.
+        try {
+            return toDomain(repository.saveAndFlush(toEntity(reservation)));
+        } catch (DataIntegrityViolationException e) {
+            if (String.valueOf(e.getMostSpecificCause().getMessage()).toLowerCase(Locale.ROOT)
+                    .contains("ex_reservations_charger_window")) {
+                throw new ConnectorAlreadyReservedException();
+            }
+            throw e;
+        }
     }
 
     @Override

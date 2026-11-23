@@ -4,10 +4,8 @@ import org.evchargingplatform.events.stations.v1.StationCreatedEvent;
 import org.evchargingplatform.station.application.port.out.StationEventPublisher;
 import org.evchargingplatform.station.domain.Station;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.kafka.core.KafkaTemplate;
+import org.evchargingplatform.shared.outbox.EventOutbox;
 import org.springframework.stereotype.Component;
-import org.springframework.kafka.support.SendResult;
-import org.springframework.util.concurrent.ListenableFutureCallback;
 import org.evchargingplatform.events.DomainEvent;
 import org.evchargingplatform.station.infrastructure.kafka.KafkaProperties;
 
@@ -17,12 +15,12 @@ import java.util.UUID;
 @Component
 @ConditionalOnProperty(name = "app.messaging.enabled", havingValue = "true")
 class KafkaStationEventPublisher implements StationEventPublisher {
-    private final KafkaTemplate<Object, Object> kafkaTemplate;
+    private final EventOutbox outbox;
     private final String stationTopic;
 
-    KafkaStationEventPublisher(KafkaTemplate<Object, Object> kafkaTemplate,
+    KafkaStationEventPublisher(EventOutbox outbox,
                                KafkaProperties properties) {
-        this.kafkaTemplate = kafkaTemplate;
+        this.outbox = outbox;
         this.stationTopic = properties.stationTopic();
     }
 
@@ -36,14 +34,7 @@ class KafkaStationEventPublisher implements StationEventPublisher {
 
     @Override
     public void publish(DomainEvent event) {
-        kafkaTemplate.send(stationTopic, String.valueOf(event.aggregateId()), event)
-                .whenComplete((result, failure) -> {
-                    if (failure != null) {
-                        org.slf4j.LoggerFactory.getLogger(getClass()).error("Kafka event publication failed eventId={} aggregateId={} topic={}", event.eventId(), event.aggregateId(), stationTopic, failure);
-                    } else {
-                        var metadata = result.getRecordMetadata();
-                        org.slf4j.LoggerFactory.getLogger(getClass()).info("Kafka event published eventId={} aggregateId={} eventType={} topic={} partition={} offset={}", event.eventId(), event.aggregateId(), event.getClass().getSimpleName(), metadata.topic(), metadata.partition(), metadata.offset());
-                    }
-                });
+        // Delivery (and any failure) is now logged by the outbox relay, after the transaction commits.
+        outbox.send(stationTopic, String.valueOf(event.aggregateId()), event);
     }
 }

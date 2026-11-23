@@ -724,6 +724,29 @@ paths:
                 $ref: '#/components/schemas/ChargingSessionResponse'
         '404':
           description: Charging session not found
+  /charging/sessions/{id}/pay:
+    post:
+      summary: Pay what a PAYMENT_FAILED session owes, with the card now on file
+      operationId: payOutstanding
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '200':
+          description: Paid; the session is now STOPPED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChargingSessionResponse'
+        '402':
+          description: The card still can't pay (body has failureCode); nothing changed
+        '404':
+          description: Charging session not found
+        '409':
+          description: Nothing is owed on this session
   /charging/sessions/{id}/stop:
     patch:
       summary: Stop a charging session

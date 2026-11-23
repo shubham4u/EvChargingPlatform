@@ -312,6 +312,26 @@ class ChargingControllerTest {
         }
     }
 
+    @Nested
+    @DisplayName("POST /charging/sessions/{id}/pay")
+    class Pay {
+
+        @Test
+        @DisplayName("the owner can pay; another driver can't")
+        void shouldLetOwnerPay() throws Exception {
+            ChargingSession owed = buildSession(ChargingSessionStatus.PAYMENT_FAILED, USER_ID);
+            when(getChargingSessionUseCase.findById(owed.id())).thenReturn(owed);
+            when(stopChargingSessionUseCase.payOutstanding(owed.id())).thenReturn(buildSession(ChargingSessionStatus.STOPPED, USER_ID));
+
+            mockMvc.perform(post("/charging/sessions/{id}/pay", owed.id()).with(driver(OTHER_USER_ID)))
+                    .andExpect(status().isForbidden());
+            mockMvc.perform(post("/charging/sessions/{id}/pay", owed.id()).with(driver(USER_ID)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("STOPPED"));
+            verify(stopChargingSessionUseCase).payOutstanding(owed.id());
+        }
+    }
+
     private String validStartBody() throws Exception {
         return objectMapper.writeValueAsString(Map.of(
                 "stationId", STATION_ID.toString(),

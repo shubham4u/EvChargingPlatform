@@ -39,7 +39,7 @@ Getting a token locally (dev only, the `ev-cli` client allows username + passwor
 | `POST /payments/{id}/refund` | 401 | 403 | ✅ |
 | `GET /notifications`, `PATCH /notifications/{id}/read` | 401 | own | own |
 | `GET /audit/events`, `GET /reports/stations/{id}` | 401 | 403 | ✅ |
-| `GET /charging/sessions/{id}`, `PATCH /charging/sessions/{id}/stop` | 401 | own only | ✅ |
+| `GET /charging/sessions/{id}`, `PATCH /charging/sessions/{id}/stop`, `POST /charging/sessions/{id}/pay` | 401 | own only | ✅ |
 
 ## Endpoints
 
@@ -60,6 +60,7 @@ Getting a token locally (dev only, the `ev-cli` client allows username + passwor
 - `PATCH /charging/sessions/{id}/stop` — stop an active session (`200 OK`)
 - `GET /charging/sessions/{id}` — read one session (`200 OK`, `404` if unknown)
 - `GET /charging/sessions` — list sessions (`200 OK`)
+- `POST /charging/sessions/{id}/pay` — pay what a `PAYMENT_FAILED` session owes with your current card (`200`, session becomes `STOPPED`; `402` if the card still fails; `409` if nothing is owed)
 - `PUT /stations/{id}/tariff` (operator) — set prices; `GET /stations/{id}/tariff` — current prices (public)
 - `PUT /payments/methods/me` — save your card token; `GET /payments/methods/me`
 - `GET /payments`, `GET /payments/{id}`; `POST /payments/{id}/refund` (operator)
@@ -126,6 +127,7 @@ Drivers save a card once with `PUT /payments/methods/me` and `{ "token": "tok_vi
 | Start | A £50 hold (`app.payments.hold-amount`) is placed on the card | No card → `402 Payment method required`. Declined → `402 Payment declined` (with `failureCode`); no session is created, but the decline is recorded. No tariff → `404 Tariff not found`. |
 | Stop | The session is priced and that amount is captured | The session ends `PAYMENT_FAILED` instead of `STOPPED`, with `totalCost` still set. The stop itself succeeds and the connector is freed. A cost above the hold also fails, with `amount_exceeds_authorization`. |
 | Refund (operator) | `POST /payments/{id}/refund` refunds a `CAPTURED` payment in full | Anything else → `409` |
+| Pay later (driver) | After updating the card, `POST /charging/sessions/{id}/pay` charges the amount owed; the session becomes `STOPPED` | Still failing → `402` and nothing changes |
 
 The session response now includes `tariffId`, `totalCost` and `currency`. Payment events (`PaymentAuthorized`, `PaymentCaptured`, `PaymentFailed`, `PaymentRefunded`) go to `payment.events.v1`, keyed by session id, with amounts in minor units.
 
@@ -144,6 +146,11 @@ PaymentRefunded                                                         (trace C
 Open a trace id in Jaeger (http://localhost:16686/trace/&lt;traceId&gt;) to see the HTTP request and every event it published.
 
 **Reports.** `GET /reports/stations/{id}` returns `sessions`, `activeSessions`, `paidSessions`, `paymentFailures`, `energyKwh`, `billed`, `revenue` (captured minus refunds), `refunded`, `outstanding` (the cost of `PAYMENT_FAILED` sessions) and `currency`.
+
+### Reliability guarantees
+
+- **An event exists exactly when its change does.** Every event is written to an outbox table in the same database transaction as the change, and published to Kafka by a relay after commit. A rolled-back request publishes nothing, and the API keeps working while Kafka is down (events queue and go out when it's back). Delivery is at least once; every consumer is idempotent on `eventId`.
+- **Two simultaneous requests can't double-book.** Beyond the application checks, the database itself allows only one open session per connector and per vehicle (unique indexes), and no overlapping open reservations on a connector (an exclusion constraint). The loser of a race gets the same `409` as anyone else.
 
 ### Reservation rules
 

@@ -16,6 +16,7 @@ import org.evchargingplatform.identity.application.port.in.GetUserUseCase;
 import org.evchargingplatform.payments.application.port.in.ChargingPaymentUseCase;
 import org.evchargingplatform.payments.domain.PaymentIntent;
 import org.evchargingplatform.payments.domain.PaymentStatus;
+import org.evchargingplatform.payments.domain.exception.PaymentDeclinedException;
 import org.evchargingplatform.pricing.application.port.in.GetTariffUseCase;
 import org.evchargingplatform.pricing.application.port.in.PriceSessionUseCase;
 import org.evchargingplatform.pricing.domain.Price;
@@ -27,6 +28,7 @@ import org.evchargingplatform.station.application.port.out.ConnectorReservationP
 import org.evchargingplatform.station.domain.ConnectorReservationProjection;
 import org.evchargingplatform.station.domain.ConnectorReservationProjection.ReservationProjectionStatus;
 import org.evchargingplatform.charging.domain.ChargingSession;
+import org.evchargingplatform.charging.domain.ChargingSessionStatus;
 import org.evchargingplatform.charging.domain.exception.ChargingSessionNotFoundException;
 import org.evchargingplatform.charging.domain.exception.ConnectorInUseException;
 import org.evchargingplatform.charging.domain.exception.ConnectorNotReservedException;
@@ -191,6 +193,19 @@ StartChargingSessionUseCase, StopChargingSessionUseCase, GetChargingSessionUseCa
         }
         eventPublisher.ifAvailable(publisher -> publisher.sessionStopped(saved));
         return saved;
+    }
+
+    @Override
+    public ChargingSession payOutstanding(UUID sessionId) {
+        ChargingSession session = findById(sessionId);
+        if (session.status() != ChargingSessionStatus.PAYMENT_FAILED) {
+            throw new IllegalStateException("Nothing is owed on this session; it is " + session.status());
+        }
+        PaymentIntent payment = chargingPaymentUseCase.collectOutstanding(sessionId, session.totalCost());
+        if (payment.status() != PaymentStatus.CAPTURED) {
+            throw new PaymentDeclinedException(payment.failureCode(), payment.failureReason());
+        }
+        return chargingSessionRepository.save(session.paymentRecovered(clock));
     }
 
     // Sessions started before Sprint 9 have no tariff and no hold; they stop unpriced, as they started.

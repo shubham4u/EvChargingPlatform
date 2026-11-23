@@ -528,6 +528,49 @@ class ChargingSessionApplicationServiceTest {
     }
 
     @Nested
+    @DisplayName("payOutstanding")
+    class PayOutstandingUseCase {
+
+        private ChargingSession unpaid() {
+            ChargingSession session = pricedSession().start(CLOCK).stop(BigDecimal.ONE, CLOCK)
+                    .priced(new BigDecimal("5.00"), "GBP").paymentFailed(CLOCK);
+            when(chargingSessionRepository.findById(session.id())).thenReturn(Optional.of(session));
+            return session;
+        }
+
+        @Test
+        @DisplayName("collects the amount owed and turns PAYMENT_FAILED into STOPPED")
+        void shouldRecover() {
+            ChargingSession session = unpaid();
+            when(chargingPaymentUseCase.collectOutstanding(session.id(), new BigDecimal("5.00")))
+                    .thenReturn(captured(session, "5.00"));
+            when(chargingSessionRepository.save(any(ChargingSession.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+            assertEquals(ChargingSessionStatus.STOPPED, service.payOutstanding(session.id()).status());
+        }
+
+        @Test
+        @DisplayName("is 402 with the reason, and changes nothing, when the card still fails")
+        void shouldReportStillFailing() {
+            ChargingSession session = unpaid();
+            when(chargingPaymentUseCase.collectOutstanding(any(), any())).thenReturn(failedCapture(session));
+
+            assertThrows(PaymentDeclinedException.class, () -> service.payOutstanding(session.id()));
+            verify(chargingSessionRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("refuses a session that owes nothing")
+        void shouldRefusePaidSession() {
+            ChargingSession active = createSession().start(CLOCK);
+            when(chargingSessionRepository.findById(active.id())).thenReturn(Optional.of(active));
+
+            assertThrows(IllegalStateException.class, () -> service.payOutstanding(active.id()));
+            verifyNoInteractions(chargingPaymentUseCase);
+        }
+    }
+
+    @Nested
     @DisplayName("findById")
     class FindByIdUseCase {
 

@@ -75,6 +75,13 @@ public class ChargingController {
         return ChargingSessionResponse.from(stopChargingSessionUseCase.stop(id, request.totalEnergyKwh()));
     }
 
+    /** Pay what a {@code PAYMENT_FAILED} session owes, using the card now on file (owner or operator). */
+    @PostMapping("/{id}/pay")
+    public ChargingSessionResponse pay(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        owned(jwt, id);
+        return ChargingSessionResponse.from(stopChargingSessionUseCase.payOutstanding(id));
+    }
+
     @GetMapping("/{id}")
     public ChargingSessionResponse findById(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
         return ChargingSessionResponse.from(owned(jwt, id));

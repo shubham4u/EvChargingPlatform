@@ -85,7 +85,6 @@ public class PaymentApplicationService implements ManagePaymentMethodUseCase, Ch
         if (!result.success()) {
             PaymentIntent declined = declinedRecorder.record(PaymentIntent.declined(sessionId, userId, currency, holdAmount,
                     card, result.failureCode(), result.failureReason(), clock));
-            eventPublisher.ifAvailable(publisher -> publisher.paymentFailed(declined));
             log.info("Hold declined for session {}: {}", sessionId, result.failureCode());
             throw new PaymentDeclinedException(result.failureCode(), result.failureReason());
         }
@@ -119,6 +118,29 @@ public class PaymentApplicationService implements ManagePaymentMethodUseCase, Ch
         } else {
             log.warn("Capture failed for session {}: {} ({})", sessionId, saved.failureCode(), saved.failureReason());
             eventPublisher.ifAvailable(publisher -> publisher.paymentFailed(saved));
+        }
+        return saved;
+    }
+
+    @Override
+    public PaymentIntent collectOutstanding(UUID sessionId, BigDecimal amount) {
+        PaymentIntent intent = intents.findBySessionId(sessionId)
+                .orElseThrow(() -> new PaymentNotFoundException("No payment for session " + sessionId));
+        if (intent.status() != PaymentStatus.FAILED) {
+            throw new IllegalStateException("Nothing to collect: this payment is " + intent.status());
+        }
+        PaymentMethod card = methods.findForUser(intent.userId()).orElseThrow(PaymentMethodRequiredException::new);
+        // A new charge, not a re-capture: the original hold belonged to the card that failed.
+        PaymentProvider.Result hold = provider.authorize(card.token(), amount, intent.currency(),
+                sessionId + "-recovery-" + UUID.randomUUID());
+        PaymentProvider.Result result = hold.success()
+                ? provider.capture(card.token(), hold.providerReference(), amount, intent.currency())
+                : hold;
+        PaymentIntent saved = intents.save(result.success()
+                ? intent.recovered(card, hold.providerReference(), amount, clock)
+                : intent.stillFailing(result.failureCode(), result.failureReason(), clock));
+        if (saved.status() == PaymentStatus.CAPTURED) {
+            eventPublisher.ifAvailable(publisher -> publisher.paymentCaptured(saved));
         }
         return saved;
     }

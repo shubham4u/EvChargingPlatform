@@ -28,7 +28,7 @@ This starts the API (8080), Keycloak (8081), Postgres, Redis, Kafka and Jaeger. 
 
 If PowerShell blocks scripts, run `powershell -ExecutionPolicy Bypass -File .\scripts\demo-flow.ps1`.
 
-Each run creates fresh Keycloak accounts (drivers Alice, Bob, Carol and Dave, operator Olivia) with random passwords, signs them in, and makes 74 checks, covering pricing, every payment outcome, notifications, the audit trail and the station report. It covers the happy path, every rule that should refuse a request, and who may do what: no token → 401, Bob touching Alice's things → 403, a driver creating a station → 403. It exits `0` when everything passes. Expected tail:
+Each run creates fresh Keycloak accounts (drivers Alice, Bob, Carol and Dave, operator Olivia) with random passwords, signs them in, and makes 82 checks, covering pricing, every payment outcome, notifications, the audit trail, the station report, paying a failed session later, and a real two-request race for one connector. It covers the happy path, every rule that should refuse a request, and who may do what: no token → 401, Bob touching Alice's things → 403, a driver creating a station → 403. It exits `0` when everything passes. Expected tail:
 
 ```
 == 13. Everyone is told, and everything is on the record
@@ -37,7 +37,7 @@ Each run creates fresh Keycloak accounts (drivers Alice, Bob, Carol and Dave, op
   report  3 sessions, ... revenue ..., refunded ..., outstanding ... GBP
   [PASS] report: revenue = Bob's bill, refunded = Alice's, outstanding = Dave's
 
-All 74 checks passed.
+All 82 checks passed.
 ```
 
 ## 4. Or step through it by hand

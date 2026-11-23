@@ -22,6 +22,8 @@ spring:
       ddl-auto: validate
   flyway:
     enabled: true
+    # Portable migrations, plus per-database ones where SQL differs (Spring fills in {vendor}: postgresql, h2).
+    locations: classpath:db/migration,classpath:db/vendor/{vendor}
   data:
     redis:
       host: ${REDIS_HOST:localhost}

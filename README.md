@@ -31,7 +31,9 @@ One Spring Boot application with ten package-by-feature, hexagonal modules. Each
 | `audit` | Every domain event as published, with the trace id linking it to the API request | `/audit/events` |
 | `reporting` | Per-station usage, revenue, refunds and amounts outstanding | `/reports/stations/{id}` |
 
-A driver signs up, adds their EV, finds a nearby compatible charger that is free right now, reserves it, starts charging, stops, and pays. A payment failure is never silent: a declined card stops the session starting, and a failed final charge ends the session `PAYMENT_FAILED`. Every reference is checked: you can't charge someone else's car, use a connector at the wrong station, take a connector that is busy or reserved by someone else, or charge one car twice at once.
+A driver signs up, adds their EV, finds a nearby compatible charger that is free right now, reserves it, starts charging, stops, and pays. A payment failure is never silent: a declined card stops the session starting, and a failed final charge ends the session `PAYMENT_FAILED` until the driver pays with another card.
+
+**Reliability:** every event is written in the same database transaction as its change (a transactional outbox) and published after commit, so nothing is announced that didn't happen and the API keeps working while Kafka is down. The database itself stops two simultaneous requests from double-booking a connector or a car. Every reference is checked: you can't charge someone else's car, use a connector at the wrong station, take a connector that is busy or reserved by someone else, or charge one car twice at once.
 
 **Login** is handled by Keycloak (OIDC); the API is an OAuth2 resource server. The caller's identity comes from the access token, never the request body. Drivers can only see and change their own things; operators manage stations and can see everything. Station browsing is public.
 
@@ -87,7 +89,7 @@ Supporting docs are in the `docs/` folder:
 - [API smoke test](docs/api-smoke-test.md)
 - [Testing and fixes](docs/testing-and-fixes.md)
 - [Station service notes](docs/station-service.md)
-- Sprint notes: [2](docs/sprint-2-event-publishing.md) · [3](docs/sprint-3-reservation-service.md) · [4](docs/sprint-4-event-consumption.md) · [5](docs/sprint-5-charging-session-service.md) · [6](docs/sprint-6-users-vehicles-connectors.md) · [7](docs/sprint-7-authentication.md) · [8](docs/sprint-8-station-search-availability.md) · [9](docs/sprint-9-pricing-payments.md) · [10](docs/sprint-10-notifications-audit-reporting.md)
+- Sprint notes: [2](docs/sprint-2-event-publishing.md) · [3](docs/sprint-3-reservation-service.md) · [4](docs/sprint-4-event-consumption.md) · [5](docs/sprint-5-charging-session-service.md) · [6](docs/sprint-6-users-vehicles-connectors.md) · [7](docs/sprint-7-authentication.md) · [8](docs/sprint-8-station-search-availability.md) · [9](docs/sprint-9-pricing-payments.md) · [10](docs/sprint-10-notifications-audit-reporting.md) · [11](docs/sprint-11-reliability.md)
 
 ## Local development
 

@@ -2,14 +2,18 @@ package org.evchargingplatform.charging.adapter.out.persistence;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 
 import org.evchargingplatform.charging.application.port.out.ChargingSessionRepository;
 import org.evchargingplatform.charging.domain.ChargingSession;
 import org.evchargingplatform.charging.domain.ChargingSessionStatus;
+import org.evchargingplatform.charging.domain.exception.ConnectorInUseException;
+import org.evchargingplatform.charging.domain.exception.VehicleAlreadyChargingException;
 import org.evchargingplatform.charging.infrastructure.persistence.ChargingSessionEntity;
 import org.evchargingplatform.charging.infrastructure.persistence.ChargingSessionJpaRepository;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -47,7 +51,20 @@ public class ChargingSessionJpaAdapter implements ChargingSessionRepository {
 
     @Override
     public ChargingSession save(ChargingSession chargingSession) {
-        return toDomain(repository.save(toEntity(chargingSession)));
+        // Flush now so a lost race on the open-session unique indexes (V14) surfaces here as the usual 409,
+        // not as a generic error at commit.
+        try {
+            return toDomain(repository.saveAndFlush(toEntity(chargingSession)));
+        } catch (DataIntegrityViolationException e) {
+            String detail = String.valueOf(e.getMostSpecificCause().getMessage()).toLowerCase(Locale.ROOT);
+            if (detail.contains("ux_charging_sessions_open_connector")) {
+                throw new ConnectorInUseException("Connector already has an active charging session: " + chargingSession.connectorId());
+            }
+            if (detail.contains("ux_charging_sessions_open_vehicle")) {
+                throw new VehicleAlreadyChargingException(chargingSession.vehicleId());
+            }
+            throw e;
+        }
     }
 
     // The domain record carries no version, so reuse the persisted one. Rebuilding the entity
