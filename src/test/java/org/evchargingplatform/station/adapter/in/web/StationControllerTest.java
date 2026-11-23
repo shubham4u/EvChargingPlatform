@@ -3,7 +3,9 @@ package org.evchargingplatform.station.adapter.in.web;
 import org.evchargingplatform.station.application.port.in.AddConnectorUseCase;
 import org.evchargingplatform.station.application.port.in.CreateStationCommand;
 import org.evchargingplatform.station.application.port.in.CreateStationUseCase;
-import org.evchargingplatform.station.application.port.in.GetConnectorsUseCase;
+import org.evchargingplatform.station.application.port.in.ConnectorStatus;
+import org.evchargingplatform.station.application.port.in.GetConnectorAvailabilityUseCase;
+import org.evchargingplatform.station.application.port.in.SearchStationsUseCase;
 import org.evchargingplatform.station.application.port.in.GetStationsUseCase;
 import org.evchargingplatform.shared.security.SecurityConfig;
 import org.evchargingplatform.station.domain.Station;
@@ -51,7 +53,10 @@ class StationControllerTest {
     private AddConnectorUseCase addConnectorUseCase;
 
     @MockBean
-    private GetConnectorsUseCase getConnectorsUseCase;
+    private GetConnectorAvailabilityUseCase connectorAvailabilityUseCase;
+
+    @MockBean
+    private SearchStationsUseCase searchStationsUseCase;
 
     @Test
     @DisplayName("POST /stations should return 201 when every field is present")

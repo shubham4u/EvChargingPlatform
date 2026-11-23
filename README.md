@@ -22,11 +22,11 @@ One Spring Boot application with five package-by-feature, hexagonal modules. Eac
 |---|---|---|
 | `identity` | Register drivers | `/users` |
 | `vehicle` | Register EVs to a driver | `/vehicles` |
-| `station` | Stations, their connectors, and a reservation read-model fed by Kafka | `/stations`, `/stations/{id}/connectors` |
+| `station` | Stations and connectors, search by location / connector / power / availability, and live connector status from read models fed by Kafka | `/stations`, `/stations/search`, `/stations/{id}/connectors` |
 | `reservation` | Reserve a connector for a time window | `/reservations` |
 | `charging` | Start and stop charging sessions | `/charging/sessions` |
 
-A driver signs up, adds their EV, reserves a connector, starts charging, and stops. Every reference is checked: you can't charge someone else's car, use a connector at the wrong station, take a connector that is busy or reserved by someone else, or charge one car twice at once.
+A driver signs up, adds their EV, finds a nearby compatible charger that is free right now, reserves it, starts charging, and stops. Every reference is checked: you can't charge someone else's car, use a connector at the wrong station, take a connector that is busy or reserved by someone else, or charge one car twice at once.
 
 **Login** is handled by Keycloak (OIDC); the API is an OAuth2 resource server. The caller's identity comes from the access token, never the request body. Drivers can only see and change their own things; operators manage stations and can see everything. Station browsing is public.
 
@@ -82,7 +82,7 @@ Supporting docs are in the `docs/` folder:
 - [API smoke test](docs/api-smoke-test.md)
 - [Testing and fixes](docs/testing-and-fixes.md)
 - [Station service notes](docs/station-service.md)
-- Sprint notes: [2](docs/sprint-2-event-publishing.md) · [3](docs/sprint-3-reservation-service.md) · [4](docs/sprint-4-event-consumption.md) · [5](docs/sprint-5-charging-session-service.md) · [6](docs/sprint-6-users-vehicles-connectors.md) · [7](docs/sprint-7-authentication.md)
+- Sprint notes: [2](docs/sprint-2-event-publishing.md) · [3](docs/sprint-3-reservation-service.md) · [4](docs/sprint-4-event-consumption.md) · [5](docs/sprint-5-charging-session-service.md) · [6](docs/sprint-6-users-vehicles-connectors.md) · [7](docs/sprint-7-authentication.md) · [8](docs/sprint-8-station-search-availability.md)
 
 ## Local development
 

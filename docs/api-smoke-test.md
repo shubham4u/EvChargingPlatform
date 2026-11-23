@@ -28,16 +28,17 @@ This starts the API (8080), Keycloak (8081), Postgres, Redis, Kafka and Jaeger. 
 
 If PowerShell blocks scripts, run `powershell -ExecutionPolicy Bypass -File .\scripts\demo-flow.ps1`.
 
-Each run creates three fresh Keycloak accounts (drivers Alice and Bob, operator Olivia) with random passwords, signs them in, and makes 31 checks. It covers the happy path, every rule that should refuse a request, and who may do what: no token → 401, Bob touching Alice's things → 403, a driver creating a station → 403. It exits `0` when everything passes. Expected tail:
+Each run creates three fresh Keycloak accounts (drivers Alice and Bob, operator Olivia) with random passwords, signs them in, and makes 43 checks. It covers the happy path, every rule that should refuse a request, and who may do what: no token → 401, Bob touching Alice's things → 403, a driver creating a station → 403. It exits `0` when everything passes. Expected tail:
 
 ```
 == 10. The operator can see and act on everything; drivers can't
   [PASS] Olivia sees both sessions at her new station
   [PASS] Olivia stops Bob's session
+  [PASS] both connectors AVAILABLE, and search offers the station again
   [PASS] Olivia can list users
   [PASS] Alice listing all users -> 403 Forbidden
 
-All 31 checks passed.
+All 43 checks passed.
 ```
 
 ## 4. Or step through it by hand
@@ -77,6 +78,16 @@ Call $alice Get "/charging/sessions"                                # only Alice
 ```
 
 Each VIN and `externalReference` must be unique, so change them if you run this twice. To reserve first, `Call $alice Post "/reservations" @{ stationId = ...; chargerId = $ccs.id; vehicleId = $car.id; startTime = (Get-Date).ToUniversalTime().AddMinutes(1).ToString("o") }`, then pass `reservationId` when starting.
+
+Find it like a driver would, with no login:
+
+```powershell
+Invoke-RestMethod "$api/stations/search?lat=51.5335&lng=-0.1238&radiusKm=2&connectorType=CCS2&minPowerKw=100" |
+    ForEach-Object { $_ } | Select-Object name, distanceKm, availableConnectors
+Invoke-RestMethod "$api/stations/$($station.id)/connectors" | ForEach-Object { $_ } | Select-Object connectorType, maxPowerKw, status
+```
+
+While Alice's session is running, her connector shows `OCCUPIED` and `&available=true` searches skip it. Within a moment of stopping, it shows `AVAILABLE` again.
 
 Check the refusals:
 

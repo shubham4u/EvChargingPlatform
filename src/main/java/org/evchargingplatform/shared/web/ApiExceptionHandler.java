@@ -24,6 +24,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.net.URI;
 import java.util.NoSuchElementException;
@@ -143,6 +144,12 @@ public class ApiExceptionHandler {
     @ExceptionHandler(MethodArgumentNotValidException.class)
     ProblemDetail handleValidation(MethodArgumentNotValidException exception) {
         return problem(HttpStatus.BAD_REQUEST, "Validation failed", "Request contains invalid fields");
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    ProblemDetail handleTypeMismatch(MethodArgumentTypeMismatchException exception) {
+        return problem(HttpStatus.BAD_REQUEST, "Invalid request",
+                "Invalid value '" + exception.getValue() + "' for parameter '" + exception.getName() + "'");
     }
 
     @ExceptionHandler(NoSuchElementException.class)

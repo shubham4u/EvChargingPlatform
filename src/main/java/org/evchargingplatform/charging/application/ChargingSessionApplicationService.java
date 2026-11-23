@@ -13,6 +13,8 @@ import org.evchargingplatform.charging.application.port.in.StopChargingSessionUs
 import org.evchargingplatform.charging.application.port.out.ChargingSessionEventPublisher;
 import org.evchargingplatform.charging.application.port.out.ChargingSessionRepository;
 import org.evchargingplatform.identity.application.port.in.GetUserUseCase;
+import org.evchargingplatform.reservation.application.port.in.ActivateReservationUseCase;
+import org.evchargingplatform.reservation.application.port.in.CompleteReservationUseCase;
 import org.evchargingplatform.station.application.port.in.GetConnectorsUseCase;
 import org.evchargingplatform.station.application.port.out.ConnectorReservationProjectionRepository;
 import org.evchargingplatform.station.domain.ConnectorReservationProjection;
@@ -48,6 +50,9 @@ import org.springframework.transaction.annotation.Transactional;
  * while another driver's reservation holds the connector. "In use" is derived from Charging's own
  * sessions rather than a connector status, so no other context needs to be told when a session ends.
  * <p>
+ * Sprint 8: a session started against a reservation activates it in the same transaction, and stopping
+ * the session completes it, so the connector stops showing as reserved once the driver leaves.
+ * <p>
  * There is no separate approval step yet, so {@link #start} moves a session straight through
  * REQUESTED to ACTIVE and publishes both lifecycle events.
  */
@@ -63,6 +68,8 @@ StartChargingSessionUseCase, StopChargingSessionUseCase, GetChargingSessionUseCa
     private final GetUserUseCase getUserUseCase;
     private final GetVehicleUseCase getVehicleUseCase;
     private final GetConnectorsUseCase getConnectorsUseCase;
+    private final ActivateReservationUseCase activateReservationUseCase;
+    private final CompleteReservationUseCase completeReservationUseCase;
 
     public ChargingSessionApplicationService(ChargingSessionRepository chargingSessionRepository,
                                               ObjectProvider<ChargingSessionEventPublisher> eventPublisher,
@@ -70,7 +77,9 @@ StartChargingSessionUseCase, StopChargingSessionUseCase, GetChargingSessionUseCa
                                               ConnectorReservationProjectionRepository connectorReservationProjectionRepository,
                                               GetUserUseCase getUserUseCase,
                                               GetVehicleUseCase getVehicleUseCase,
-                                              GetConnectorsUseCase getConnectorsUseCase) {
+                                              GetConnectorsUseCase getConnectorsUseCase,
+                                              ActivateReservationUseCase activateReservationUseCase,
+                                              CompleteReservationUseCase completeReservationUseCase) {
         this.chargingSessionRepository = chargingSessionRepository;
         this.eventPublisher = eventPublisher;
         this.clock = clock;
@@ -78,6 +87,8 @@ StartChargingSessionUseCase, StopChargingSessionUseCase, GetChargingSessionUseCa
         this.getUserUseCase = getUserUseCase;
         this.getVehicleUseCase = getVehicleUseCase;
         this.getConnectorsUseCase = getConnectorsUseCase;
+        this.activateReservationUseCase = activateReservationUseCase;
+        this.completeReservationUseCase = completeReservationUseCase;
     }
 
 
@@ -121,6 +132,7 @@ StartChargingSessionUseCase, StopChargingSessionUseCase, GetChargingSessionUseCa
                 throw new ConnectorNotReservedException(
                         "Connector is not reserved for the provided reservation ID, connector ID, and user ID.");
             }
+            activateReservationUseCase.activate(command.reservationId());
         } else {
             ensureNotHeldByAnotherReservation(command);
         }
@@ -144,6 +156,9 @@ StartChargingSessionUseCase, StopChargingSessionUseCase, GetChargingSessionUseCa
                 .orElseThrow(() -> new ChargingSessionNotFoundException(sessionId));
         ChargingSession stoppedSession = session.stop(totalEnergyKwh, clock);
         ChargingSession saved = chargingSessionRepository.save(stoppedSession);
+        if (saved.reservationId() != null) {
+            completeReservationUseCase.completeIfActive(saved.reservationId());
+        }
         eventPublisher.ifAvailable(publisher -> publisher.sessionStopped(saved));
         return saved;
     }

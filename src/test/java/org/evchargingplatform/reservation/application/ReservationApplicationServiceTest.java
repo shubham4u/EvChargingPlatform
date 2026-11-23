@@ -270,6 +270,52 @@ class ReservationApplicationServiceTest {
     }
 
     @Nested
+    @DisplayName("charging lifecycle")
+    class ChargingLifecycle {
+
+        @Test
+        @DisplayName("activate should move a CREATED reservation to ACTIVE")
+        void shouldActivate() {
+            Reservation created = createReservation();
+            when(reservationRepository.findById(created.id())).thenReturn(Optional.of(created));
+            when(reservationRepository.save(any(Reservation.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+            assertEquals(ReservationStatus.ACTIVE, service.activate(created.id()).status());
+        }
+
+        @Test
+        @DisplayName("activate should refuse a reservation that is already over")
+        void shouldNotActivateTerminal() {
+            Reservation cancelled = createReservation().cancel(CLOCK);
+            when(reservationRepository.findById(cancelled.id())).thenReturn(Optional.of(cancelled));
+
+            assertThrows(IllegalStateException.class, () -> service.activate(cancelled.id()));
+        }
+
+        @Test
+        @DisplayName("completeIfActive should complete an ACTIVE reservation and publish")
+        void shouldCompleteIfActive() {
+            Reservation active = createReservation().activate(CLOCK);
+            when(reservationRepository.findById(active.id())).thenReturn(Optional.of(active));
+            when(reservationRepository.save(any(Reservation.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+            assertEquals(ReservationStatus.COMPLETED, service.completeIfActive(active.id()).orElseThrow().status());
+            verify(eventPublisher).reservationCompleted(any(Reservation.class));
+        }
+
+        @Test
+        @DisplayName("completeIfActive should leave a non-ACTIVE reservation alone without throwing")
+        void shouldSkipWhenNotActive() {
+            Reservation cancelled = createReservation().cancel(CLOCK);
+            when(reservationRepository.findById(cancelled.id())).thenReturn(Optional.of(cancelled));
+
+            assertTrue(service.completeIfActive(cancelled.id()).isEmpty());
+            verify(reservationRepository, never()).save(any());
+            verify(eventPublisher, never()).reservationCompleted(any());
+        }
+    }
+
+    @Nested
     @DisplayName("findById")
     class FindByIdUseCase {
 
@@ -325,16 +371,15 @@ class ReservationApplicationServiceTest {
     class ExpireUseCase {
 
         @Test
-        @DisplayName("should expire all expired CREATED and ACTIVE reservations")
+        @DisplayName("should expire overdue CREATED reservations only; ACTIVE ones are in use and end when charging stops")
         void shouldExpireExpiredReservations() {
-            Reservation expiredCreated = createReservation();
-            Reservation expiredActive = createReservation().activate(CLOCK);
             when(reservationRepository.findExpired(any(), any()))
-                    .thenReturn(List.of(expiredCreated, expiredActive));
+                    .thenReturn(List.of(createReservation(), createReservation()));
             when(reservationRepository.save(any(Reservation.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
             service.expireReservations();
 
+            verify(reservationRepository).findExpired(List.of(ReservationStatus.CREATED), FIXED_NOW);
             verify(reservationRepository, times(2)).save(any(Reservation.class));
             verify(eventPublisher, times(2)).reservationExpired(any(Reservation.class));
         }
