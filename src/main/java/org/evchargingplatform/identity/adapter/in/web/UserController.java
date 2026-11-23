@@ -1,13 +1,15 @@
 package org.evchargingplatform.identity.adapter.in.web;
 
-import jakarta.validation.Valid;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.Validator;
 import jakarta.validation.constraints.Size;
 import org.evchargingplatform.identity.application.port.in.GetUserUseCase;
 import org.evchargingplatform.identity.application.port.in.RegisterUserCommand;
 import org.evchargingplatform.identity.application.port.in.RegisterUserUseCase;
 import org.evchargingplatform.shared.security.AuthenticatedUser;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -33,10 +36,15 @@ public class UserController {
 
     private final RegisterUserUseCase registerUserUseCase;
     private final GetUserUseCase getUserUseCase;
+    private final ObjectMapper objectMapper;
+    private final Validator validator;
 
-    public UserController(RegisterUserUseCase registerUserUseCase, GetUserUseCase getUserUseCase) {
+    public UserController(RegisterUserUseCase registerUserUseCase, GetUserUseCase getUserUseCase,
+                          ObjectMapper objectMapper, Validator validator) {
         this.registerUserUseCase = registerUserUseCase;
         this.getUserUseCase = getUserUseCase;
+        this.objectMapper = objectMapper;
+        this.validator = validator;
     }
 
     /** Both fields optional: the display name defaults to the name on the account. */
@@ -45,28 +53,42 @@ public class UserController {
             @Size(max = 30) String phoneNumber) {
     }
 
-    @PostMapping(value = "/me", consumes = MediaType.APPLICATION_JSON_VALUE)
-    @ResponseStatus(HttpStatus.CREATED)
-    public UserResponse register(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody RegisterRequest request) {
-        return registerCaller(jwt, request);
-    }
-
-    // A body-less POST arrives with whatever Content-Type the client defaults to (Windows PowerShell
-    // sends form-urlencoded), which the JSON mapping above would reject with 415. The JSON body must be
-    // required there, otherwise Spring matches both mappings for a body-less request and fails as ambiguous.
+    /**
+     * The body is optional, and clients send a body-less POST in different ways: no Content-Type,
+     * form-urlencoded (Windows PowerShell's default), or {@code application/json} with nothing after it
+     * (most HTTP libraries once the header is set). Spring's JSON binding rejects some of these with
+     * 415 or 400, and two mappings split by {@code consumes} can't cover them all without becoming
+     * ambiguous. So this reads the raw body, which works for any Content-Type, and parses it as JSON
+     * only when there is one.
+     */
     @PostMapping("/me")
     @ResponseStatus(HttpStatus.CREATED)
-    public UserResponse registerWithoutBody(@AuthenticationPrincipal Jwt jwt) {
-        return registerCaller(jwt, null);
-    }
-
-    private UserResponse registerCaller(Jwt jwt, RegisterRequest request) {
+    public UserResponse register(@AuthenticationPrincipal Jwt jwt, @RequestBody(required = false) String body) {
+        RegisterRequest request = parse(body);
         AuthenticatedUser caller = AuthenticatedUser.from(jwt);
         String displayName = request != null && request.displayName() != null && !request.displayName().isBlank()
                 ? request.displayName() : caller.name();
         String phoneNumber = request == null ? null : request.phoneNumber();
         return UserResponse.from(registerUserUseCase.register(
                 new RegisterUserCommand(caller.id(), caller.email(), displayName == null ? caller.email() : displayName, phoneNumber)));
+    }
+
+    private RegisterRequest parse(String body) {
+        if (body == null || body.isBlank()) {
+            return null;
+        }
+        RegisterRequest request;
+        try {
+            request = objectMapper.readValue(body, RegisterRequest.class);
+        } catch (JsonProcessingException e) {
+            throw new IllegalArgumentException("Body must be JSON like {\"displayName\": \"...\", \"phoneNumber\": \"...\"}, or empty");
+        }
+        Set<ConstraintViolation<RegisterRequest>> violations = validator.validate(request);
+        if (!violations.isEmpty()) {
+            ConstraintViolation<RegisterRequest> first = violations.iterator().next();
+            throw new IllegalArgumentException(first.getPropertyPath() + " " + first.getMessage());
+        }
+        return request;
     }
 
     @GetMapping("/me")
