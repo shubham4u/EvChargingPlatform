@@ -11,6 +11,15 @@ import org.evchargingplatform.charging.domain.exception.ConnectorNotReservedExce
 import org.evchargingplatform.charging.domain.exception.VehicleAlreadyChargingException;
 import org.evchargingplatform.identity.application.port.in.GetUserUseCase;
 import org.evchargingplatform.identity.domain.exception.UserNotFoundException;
+import org.evchargingplatform.payments.application.port.in.ChargingPaymentUseCase;
+import org.evchargingplatform.payments.domain.PaymentIntent;
+import org.evchargingplatform.payments.domain.PaymentMethod;
+import org.evchargingplatform.payments.domain.exception.PaymentDeclinedException;
+import org.evchargingplatform.pricing.application.port.in.GetTariffUseCase;
+import org.evchargingplatform.pricing.application.port.in.PriceSessionUseCase;
+import org.evchargingplatform.pricing.domain.Price;
+import org.evchargingplatform.pricing.domain.Tariff;
+import org.evchargingplatform.pricing.domain.exception.TariffNotFoundException;
 import org.evchargingplatform.reservation.application.port.in.ActivateReservationUseCase;
 import org.evchargingplatform.reservation.application.port.in.CompleteReservationUseCase;
 import org.evchargingplatform.station.application.port.in.GetConnectorsUseCase;
@@ -67,6 +76,10 @@ class ChargingSessionApplicationServiceTest {
     private static final Instant FIXED_NOW = Instant.parse("2026-01-01T12:00:00Z");
     private static final Clock CLOCK = Clock.fixed(FIXED_NOW, ZoneOffset.UTC);
 
+    private static final Tariff TARIFF = Tariff.define(STATION_ID, "GBP", new BigDecimal("0.45"),
+            new BigDecimal("0.05"), new BigDecimal("0.50"), UUID.randomUUID(), CLOCK);
+    private static final PaymentMethod CARD = new PaymentMethod(USER_ID, "tok_visa", "visa", "4242", FIXED_NOW);
+
     @Mock
     private ChargingSessionRepository chargingSessionRepository;
 
@@ -91,17 +104,28 @@ class ChargingSessionApplicationServiceTest {
     @Mock
     private CompleteReservationUseCase completeReservationUseCase;
 
+    @Mock
+    private GetTariffUseCase getTariffUseCase;
+
+    @Mock
+    private PriceSessionUseCase priceSessionUseCase;
+
+    @Mock
+    private ChargingPaymentUseCase chargingPaymentUseCase;
+
     private ChargingSessionApplicationService service;
 
     @BeforeEach
     void setUp() {
         service = newService(new TestEventPublisherProvider(eventPublisher));
+        // Every station is priced unless a test says otherwise; holds succeed by default (the mock returns null).
+        lenient().when(getTariffUseCase.currentFor(STATION_ID)).thenReturn(TARIFF);
     }
 
     private ChargingSessionApplicationService newService(ObjectProvider<ChargingSessionEventPublisher> provider) {
         return new ChargingSessionApplicationService(chargingSessionRepository, provider, CLOCK, projectionRepository,
                 getUserUseCase, getVehicleUseCase, getConnectorsUseCase, activateReservationUseCase,
-                completeReservationUseCase);
+                completeReservationUseCase, getTariffUseCase, priceSessionUseCase, chargingPaymentUseCase);
     }
 
     /**
@@ -195,6 +219,7 @@ class ChargingSessionApplicationServiceTest {
             verify(getVehicleUseCase).findOwnedBy(VEHICLE_ID, USER_ID);
             verify(getConnectorsUseCase).findAtStation(STATION_ID, CONNECTOR_ID);
             verify(projectionRepository, never()).findByReservationId(any());
+            assertEquals(TARIFF.id(), result.tariffId(), "the tariff in force is locked in");
             verifyNoInteractions(activateReservationUseCase);
         }
 
@@ -324,6 +349,39 @@ class ChargingSessionApplicationServiceTest {
         }
 
         @Test
+        @DisplayName("should take the hold before saving or announcing the session")
+        void shouldAuthorizeBeforeSaving() {
+            when(chargingSessionRepository.save(any(ChargingSession.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+            ChargingSession result = service.start(command(null));
+
+            InOrder inOrder = inOrder(chargingPaymentUseCase, chargingSessionRepository, eventPublisher);
+            inOrder.verify(chargingPaymentUseCase).authorizeHold(result.id(), USER_ID, "GBP");
+            inOrder.verify(chargingSessionRepository).save(any(ChargingSession.class));
+            inOrder.verify(eventPublisher).sessionRequested(any(ChargingSession.class));
+        }
+
+        @Test
+        @DisplayName("should refuse to start, saving and announcing nothing, when the card is declined")
+        void shouldNotStartWhenDeclined() {
+            when(chargingPaymentUseCase.authorizeHold(any(), eq(USER_ID), eq("GBP")))
+                    .thenThrow(new PaymentDeclinedException("card_declined", "declined"));
+
+            assertThrows(PaymentDeclinedException.class, () -> service.start(command(null)));
+            verifyNothingSavedOrPublished();
+        }
+
+        @Test
+        @DisplayName("should refuse to start at a station with no tariff, without touching the card")
+        void shouldNotStartWithoutTariff() {
+            when(getTariffUseCase.currentFor(STATION_ID)).thenThrow(TariffNotFoundException.forStation(STATION_ID));
+
+            assertThrows(TariffNotFoundException.class, () -> service.start(command(null)));
+            verifyNothingSavedOrPublished();
+            verifyNoInteractions(chargingPaymentUseCase);
+        }
+
+        @Test
         @DisplayName("should start without error when no event publisher is available")
         void shouldStartWhenPublisherUnavailable() {
             service = newService(new TestEventPublisherProvider(null));
@@ -357,6 +415,54 @@ class ChargingSessionApplicationServiceTest {
             ArgumentCaptor<ChargingSession> captor = ArgumentCaptor.forClass(ChargingSession.class);
             verify(eventPublisher).sessionStopped(captor.capture());
             assertEquals(totalEnergyKwh, captor.getValue().totalEnergyKwh());
+        }
+
+        @Test
+        @DisplayName("should price the session at its tariff, capture that amount, and end STOPPED")
+        void shouldPriceAndCapture() {
+            ChargingSession active = pricedSession().start(CLOCK);
+            Price price = new Price(TARIFF.id(), "GBP", new BigDecimal("0.50"), new BigDecimal("8.21"), BigDecimal.ZERO.setScale(2),
+                    BigDecimal.ZERO, new BigDecimal("8.71"));
+            when(chargingSessionRepository.findById(active.id())).thenReturn(Optional.of(active));
+            when(chargingSessionRepository.save(any(ChargingSession.class))).thenAnswer(invocation -> invocation.getArgument(0));
+            when(priceSessionUseCase.price(eq(TARIFF.id()), eq(new BigDecimal("18.250")), any(), any())).thenReturn(price);
+            when(chargingPaymentUseCase.capture(active.id(), new BigDecimal("8.71"))).thenReturn(captured(active, "8.71"));
+
+            ChargingSession result = service.stop(active.id(), new BigDecimal("18.250"));
+
+            assertEquals(ChargingSessionStatus.STOPPED, result.status());
+            assertEquals(new BigDecimal("8.71"), result.totalCost());
+            assertEquals("GBP", result.currency());
+        }
+
+        @Test
+        @DisplayName("should end PAYMENT_FAILED, still freeing the connector and completing the reservation, when capture fails")
+        void shouldFlagFailedCapture() {
+            ChargingSession active = ChargingSession.create(STATION_ID, CONNECTOR_ID, USER_ID, VEHICLE_ID, RESERVATION_ID, CLOCK)
+                    .withTariff(TARIFF.id()).start(CLOCK);
+            when(chargingSessionRepository.findById(active.id())).thenReturn(Optional.of(active));
+            when(chargingSessionRepository.save(any(ChargingSession.class))).thenAnswer(invocation -> invocation.getArgument(0));
+            when(priceSessionUseCase.price(any(), any(), any(), any())).thenReturn(new Price(TARIFF.id(), "GBP",
+                    new BigDecimal("0.50"), BigDecimal.ONE, BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("1.50")));
+            when(chargingPaymentUseCase.capture(any(), any())).thenReturn(failedCapture(active));
+
+            ChargingSession result = service.stop(active.id(), BigDecimal.ONE);
+
+            assertEquals(ChargingSessionStatus.PAYMENT_FAILED, result.status());
+            assertEquals(new BigDecimal("1.50"), result.totalCost(), "the amount owed is still recorded");
+            verify(eventPublisher).sessionStopped(result);
+            verify(completeReservationUseCase).completeIfActive(RESERVATION_ID);
+        }
+
+        @Test
+        @DisplayName("should stop a session started before pricing existed without pricing or capturing it")
+        void shouldStopLegacySessionUnpriced() {
+            ChargingSession legacy = createSession().start(CLOCK);
+            when(chargingSessionRepository.findById(legacy.id())).thenReturn(Optional.of(legacy));
+            when(chargingSessionRepository.save(any(ChargingSession.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+            assertEquals(ChargingSessionStatus.STOPPED, service.stop(legacy.id(), BigDecimal.ONE).status());
+            verifyNoInteractions(priceSessionUseCase, chargingPaymentUseCase);
         }
 
         @Test
@@ -474,6 +580,20 @@ class ChargingSessionApplicationServiceTest {
             ReservationProjectionStatus status, UUID connectorId, UUID userId) {
         return new ConnectorReservationProjection(
                 RESERVATION_ID, STATION_ID, connectorId, userId, status, FIXED_NOW.plusSeconds(600), FIXED_NOW);
+    }
+
+    private ChargingSession pricedSession() {
+        return createSession().withTariff(TARIFF.id());
+    }
+
+    private static PaymentIntent captured(ChargingSession session, String amount) {
+        return PaymentIntent.authorized(session.id(), USER_ID, "GBP", new BigDecimal("50.00"), CARD, "sim_auth", CLOCK)
+                .captured(new BigDecimal(amount), CLOCK);
+    }
+
+    private static PaymentIntent failedCapture(ChargingSession session) {
+        return PaymentIntent.authorized(session.id(), USER_ID, "GBP", new BigDecimal("50.00"), CARD, "sim_auth", CLOCK)
+                .captureFailed("capture_failed", "The issuer rejected the final charge", CLOCK);
     }
 
     private ChargingSession createSession() {

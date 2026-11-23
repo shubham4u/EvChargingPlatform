@@ -13,6 +13,13 @@ import org.evchargingplatform.charging.application.port.in.StopChargingSessionUs
 import org.evchargingplatform.charging.application.port.out.ChargingSessionEventPublisher;
 import org.evchargingplatform.charging.application.port.out.ChargingSessionRepository;
 import org.evchargingplatform.identity.application.port.in.GetUserUseCase;
+import org.evchargingplatform.payments.application.port.in.ChargingPaymentUseCase;
+import org.evchargingplatform.payments.domain.PaymentIntent;
+import org.evchargingplatform.payments.domain.PaymentStatus;
+import org.evchargingplatform.pricing.application.port.in.GetTariffUseCase;
+import org.evchargingplatform.pricing.application.port.in.PriceSessionUseCase;
+import org.evchargingplatform.pricing.domain.Price;
+import org.evchargingplatform.pricing.domain.Tariff;
 import org.evchargingplatform.reservation.application.port.in.ActivateReservationUseCase;
 import org.evchargingplatform.reservation.application.port.in.CompleteReservationUseCase;
 import org.evchargingplatform.station.application.port.in.GetConnectorsUseCase;
@@ -53,6 +60,13 @@ import org.springframework.transaction.annotation.Transactional;
  * Sprint 8: a session started against a reservation activates it in the same transaction, and stopping
  * the session completes it, so the connector stops showing as reserved once the driver leaves.
  * <p>
+ * Sprint 9: starting needs a tariff (404 if the station has none) and a successful hold on the
+ * driver's card (402 if declined). The hold is taken before the session is saved or announced, so a
+ * declined card leaves nothing behind except the payment's own failure record. Stopping prices the
+ * session at the tariff it started under and captures that amount. If the capture fails, the
+ * session ends {@code PAYMENT_FAILED} instead of {@code STOPPED}. The stop still succeeds and the
+ * connector is freed, but the session is never reported as paid (acceptance criterion 3).
+ * <p>
  * There is no separate approval step yet, so {@link #start} moves a session straight through
  * REQUESTED to ACTIVE and publishes both lifecycle events.
  */
@@ -70,6 +84,9 @@ StartChargingSessionUseCase, StopChargingSessionUseCase, GetChargingSessionUseCa
     private final GetConnectorsUseCase getConnectorsUseCase;
     private final ActivateReservationUseCase activateReservationUseCase;
     private final CompleteReservationUseCase completeReservationUseCase;
+    private final GetTariffUseCase getTariffUseCase;
+    private final PriceSessionUseCase priceSessionUseCase;
+    private final ChargingPaymentUseCase chargingPaymentUseCase;
 
     public ChargingSessionApplicationService(ChargingSessionRepository chargingSessionRepository,
                                               ObjectProvider<ChargingSessionEventPublisher> eventPublisher,
@@ -79,7 +96,10 @@ StartChargingSessionUseCase, StopChargingSessionUseCase, GetChargingSessionUseCa
                                               GetVehicleUseCase getVehicleUseCase,
                                               GetConnectorsUseCase getConnectorsUseCase,
                                               ActivateReservationUseCase activateReservationUseCase,
-                                              CompleteReservationUseCase completeReservationUseCase) {
+                                              CompleteReservationUseCase completeReservationUseCase,
+                                              GetTariffUseCase getTariffUseCase,
+                                              PriceSessionUseCase priceSessionUseCase,
+                                              ChargingPaymentUseCase chargingPaymentUseCase) {
         this.chargingSessionRepository = chargingSessionRepository;
         this.eventPublisher = eventPublisher;
         this.clock = clock;
@@ -89,6 +109,9 @@ StartChargingSessionUseCase, StopChargingSessionUseCase, GetChargingSessionUseCa
         this.getConnectorsUseCase = getConnectorsUseCase;
         this.activateReservationUseCase = activateReservationUseCase;
         this.completeReservationUseCase = completeReservationUseCase;
+        this.getTariffUseCase = getTariffUseCase;
+        this.priceSessionUseCase = priceSessionUseCase;
+        this.chargingPaymentUseCase = chargingPaymentUseCase;
     }
 
 
@@ -137,9 +160,11 @@ StartChargingSessionUseCase, StopChargingSessionUseCase, GetChargingSessionUseCa
             ensureNotHeldByAnotherReservation(command);
         }
 
+        Tariff tariff = getTariffUseCase.currentFor(command.stationId());
         ChargingSession requested = ChargingSession.create(
                 command.stationId(), command.connectorId(), command.userId(), command.vehicleId(),
-                command.reservationId(), clock);
+                command.reservationId(), clock).withTariff(tariff.id());
+        chargingPaymentUseCase.authorizeHold(requested.id(), command.userId(), tariff.currency());
         ChargingSession savedRequested = chargingSessionRepository.save(requested);
         eventPublisher.ifAvailable(publisher -> publisher.sessionRequested(savedRequested));
 
@@ -154,13 +179,25 @@ StartChargingSessionUseCase, StopChargingSessionUseCase, GetChargingSessionUseCa
     public ChargingSession stop(UUID sessionId, BigDecimal totalEnergyKwh) {
         ChargingSession session = chargingSessionRepository.findById(sessionId)
                 .orElseThrow(() -> new ChargingSessionNotFoundException(sessionId));
-        ChargingSession stoppedSession = session.stop(totalEnergyKwh, clock);
+        ChargingSession stoppedSession = settle(session.stop(totalEnergyKwh, clock));
         ChargingSession saved = chargingSessionRepository.save(stoppedSession);
         if (saved.reservationId() != null) {
             completeReservationUseCase.completeIfActive(saved.reservationId());
         }
         eventPublisher.ifAvailable(publisher -> publisher.sessionStopped(saved));
         return saved;
+    }
+
+    // Sessions started before Sprint 9 have no tariff and no hold; they stop unpriced, as they started.
+    private ChargingSession settle(ChargingSession stopped) {
+        if (stopped.tariffId() == null) {
+            return stopped;
+        }
+        Price price = priceSessionUseCase.price(stopped.tariffId(), stopped.totalEnergyKwh(),
+                stopped.startedAt(), stopped.stoppedAt());
+        ChargingSession priced = stopped.priced(price.total(), price.currency());
+        PaymentIntent payment = chargingPaymentUseCase.capture(stopped.id(), price.total());
+        return payment.status() == PaymentStatus.CAPTURED ? priced : priced.paymentFailed(clock);
     }
 
     // Ignores holds whose expiry has passed, so a delayed expiry event cannot block the connector.

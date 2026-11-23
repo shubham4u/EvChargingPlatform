@@ -334,6 +334,9 @@ class ChargingControllerTest {
                 status == ChargingSessionStatus.REQUESTED ? null : now,
                 stopped ? now : null,
                 stopped ? new BigDecimal("12.5") : null,
+                UUID.randomUUID(),
+                stopped ? new BigDecimal("6.13") : null,
+                stopped ? "GBP" : null,
                 now, now);
     }
 }

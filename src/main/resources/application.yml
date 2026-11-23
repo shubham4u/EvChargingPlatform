@@ -59,7 +59,12 @@ app:
     charging-events-topic: ${CHARGING_EVENTS_TOPIC:charging.events.v1}
     user-events-topic: ${USER_EVENTS_TOPIC:user.events.v1}
     vehicle-events-topic: ${VEHICLE_EVENTS_TOPIC:vehicle.events.v1}
+    payment-events-topic: ${PAYMENT_EVENTS_TOPIC:payment.events.v1}
     consumer-group: ${KAFKA_CONSUMER_GROUP:station-service}
+  payments:
+    # Held on the driver's card when charging starts, in the station tariff's currency; the real cost is
+    # captured on stop. A session costing more than this ends PAYMENT_FAILED (no incremental authorization yet).
+    hold-amount: ${PAYMENT_HOLD_AMOUNT:50.00}
   # Bound by station/infrastructure/kafka/KafkaProperties: topics created at startup and the station publisher's topic.
   kafka:
     station-topic: ${STATION_EVENTS_TOPIC:station.events.v1}

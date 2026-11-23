@@ -32,6 +32,11 @@ Getting a token locally (dev only, the `ev-cli` client allows username + passwor
 | `POST /reservations`, `GET /reservations` | 401 | own | ✅ all |
 | `GET /reservations/{id}`, `PATCH …/cancel`, `PATCH …/complete`, `DELETE /reservations/{id}` | 401 | own only | ✅ |
 | `POST /charging/sessions`, `GET /charging/sessions` | 401 | own | ✅ all |
+| `GET /stations/{id}/tariff` | ✅ | ✅ | ✅ |
+| `PUT /stations/{id}/tariff` | 401 | 403 | ✅ |
+| `PUT /payments/methods/me`, `GET /payments/methods/me` | 401 | self | self |
+| `GET /payments`, `GET /payments/{id}` | 401 | own | ✅ all |
+| `POST /payments/{id}/refund` | 401 | 403 | ✅ |
 | `GET /charging/sessions/{id}`, `PATCH /charging/sessions/{id}/stop` | 401 | own only | ✅ |
 
 ## Endpoints
@@ -53,6 +58,9 @@ Getting a token locally (dev only, the `ev-cli` client allows username + passwor
 - `PATCH /charging/sessions/{id}/stop` — stop an active session (`200 OK`)
 - `GET /charging/sessions/{id}` — read one session (`200 OK`, `404` if unknown)
 - `GET /charging/sessions` — list sessions (`200 OK`)
+- `PUT /stations/{id}/tariff` (operator) — set prices; `GET /stations/{id}/tariff` — current prices (public)
+- `PUT /payments/methods/me` — save your card token; `GET /payments/methods/me`
+- `GET /payments`, `GET /payments/{id}`; `POST /payments/{id}/refund` (operator)
 
 Charging follows the Reservation convention (`POST` the collection to create, `PATCH /{id}/<transition>` for state changes) rather than the verb-style `POST /charging/start` / `POST /charging/stop` originally planned here — see Decision 2 in `sprint-5-charging-session-service.md`.
 
@@ -100,6 +108,22 @@ GET /stations/search?lat=51.5308&lng=-0.1238&radiusKm=5&connectorType=CCS2&minPo
 
 Connector `status` (also on `GET /stations/{id}/connectors`) is `OCCUPIED` while a session runs, otherwise `RESERVED` while an unexpired reservation holds it, otherwise `AVAILABLE`. It comes from the station's own read models, fed by charging and reservation events over Kafka, so it trails a start or stop by a fraction of a second (measured at under 100 ms locally). Starting a session is still checked against the charging context's own data, so a stale status can never let two cars onto one connector.
 
+### Prices and payment
+
+An operator sets a station's tariff: `PUT /stations/{id}/tariff` with `{ "currency": "GBP", "pricePerKwh": 0.45, "pricePerMinute": 0.05, "sessionFee": 0.50 }`. Each change is a new version. A session is billed at the tariff in force when it **started**.
+
+**Cost** = session fee + kWh × price per kWh + minutes plugged in × price per minute. The parts are added at full precision, and the total is rounded once, half up, to 2 decimals.
+
+Drivers save a card once with `PUT /payments/methods/me` and `{ "token": "tok_visa" }`. The token comes from the payment provider; no card numbers are ever stored. Then:
+
+| Step | What happens | If it fails |
+|---|---|---|
+| Start | A £50 hold (`app.payments.hold-amount`) is placed on the card | No card → `402 Payment method required`. Declined → `402 Payment declined` (with `failureCode`); no session is created, but the decline is recorded. No tariff → `404 Tariff not found`. |
+| Stop | The session is priced and that amount is captured | The session ends `PAYMENT_FAILED` instead of `STOPPED`, with `totalCost` still set. The stop itself succeeds and the connector is freed. A cost above the hold also fails, with `amount_exceeds_authorization`. |
+| Refund (operator) | `POST /payments/{id}/refund` refunds a `CAPTURED` payment in full | Anything else → `409` |
+
+The session response now includes `tariffId`, `totalCost` and `currency`. Payment events (`PaymentAuthorized`, `PaymentCaptured`, `PaymentFailed`, `PaymentRefunded`) go to `payment.events.v1`, keyed by session id, with amounts in minor units.
+
 ### Reservation rules
 
 `POST /reservations` (`stationId`, `chargerId`, `vehicleId`, `startTime`; the user is the caller) checks that the caller has a profile (`404 User not found`), the vehicle is theirs (`409 Vehicle not owned by user`), and `chargerId` is a connector at `stationId` (`404 Connector not found`). A reservation holds the connector from `startTime` for 10 minutes; a second open reservation whose window overlaps it on the same connector gets `409 Connector already reserved`. Starting a session against the reservation makes it `ACTIVE`, and stopping the session makes it `COMPLETED`. Only a `CREATED` reservation (the driver never turned up) expires.
@@ -142,10 +166,13 @@ Session response (all endpoints):
   "userId": "uuid",
   "vehicleId": "uuid",
   "reservationId": "uuid | null",
-  "status": "REQUESTED | ACTIVE | STOPPED",
+  "status": "REQUESTED | ACTIVE | STOPPED | PAYMENT_FAILED",
   "startedAt": "2026-11-22T15:55:42.355470Z",
   "stoppedAt": "2026-11-22T15:55:42.477032Z | null",
   "totalEnergyKwh": 18.25,
+  "tariffId": "uuid",
+  "totalCost": 8.71,
+  "currency": "GBP",
   "createdAt": "2026-11-22T15:55:42.267146Z",
   "updatedAt": "2026-11-22T15:55:42.477032Z"
 }
