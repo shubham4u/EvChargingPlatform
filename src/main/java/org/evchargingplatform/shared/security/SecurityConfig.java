@@ -36,8 +36,11 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health/**", "/actuator/health", "/actuator/info").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/stations", "/stations/*", "/stations/*/connectors").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/stations", "/stations/*", "/stations/*/connectors",
+                                "/stations/*/tariff").permitAll()
                         .requestMatchers(HttpMethod.POST, "/stations", "/stations/*/connectors").hasRole("OPERATOR")
+                        .requestMatchers(HttpMethod.PUT, "/stations/*/tariff").hasRole("OPERATOR")
+                        .requestMatchers(HttpMethod.POST, "/payments/*/refund").hasRole("OPERATOR")
                         .requestMatchers(HttpMethod.GET, "/users").hasRole("OPERATOR")
                         .requestMatchers("/error").permitAll()
                         .anyRequest().authenticated())

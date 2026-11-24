@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
   End-to-end demo of the driver journey with real logins:
-  sign up -> profile -> add EV -> operator sets up a station -> reserve -> charge -> stop.
+  sign up -> profile -> card -> add EV -> operator sets up a priced station -> find it -> reserve -> charge -> pay.
 
 .DESCRIPTION
-  Creates three fresh Keycloak accounts each run (drivers Alice and Bob, operator Olivia) with random
+  Creates fresh Keycloak accounts each run (drivers Alice, Bob, Carol, Dave; operator Olivia) with random
   passwords, signs each in to get an access token, then calls the API as them and asserts every step,
   including what each of them is NOT allowed to do. Doubles as a smoke test.
 
@@ -86,7 +86,7 @@ function New-Account($name, [switch]$Operator) {
     return @{ Id = $id; Token = $token; Username = $username }
 }
 
-Step "0. Sign up three accounts in Keycloak"
+Step "0. Sign up accounts in Keycloak"
 $alice = New-Account "Alice"
 $bob = New-Account "Bob"
 $olivia = New-Account "Olivia" -Operator
@@ -105,6 +105,9 @@ Write-Host "  profile $($aliceProfile.id)  $($aliceProfile.email)  '$($aliceProf
 Check "profile id is her Keycloak account id" ($aliceProfile.id -eq $alice.Id)
 Check "GET /users/me returns her" ((Api $alice.Token Get "/users/me").email -eq "$($alice.Username)@example.com")
 ExpectError "registering a second profile" 409 (ApiError $alice.Token Post "/users/me" @{})
+ExpectError "saving a raw card number instead of a provider token" 400 (ApiError $alice.Token Put "/payments/methods/me" @{ token = "4242424242424242" })
+$aliceCard = Api $alice.Token Put "/payments/methods/me" @{ token = "tok_visa" }
+Check "Alice saves a card (visa ending 4242)" ($aliceCard.brand -eq "visa" -and $aliceCard.last4 -eq "4242")
 
 Step "3. Alice registers her EV (no owner id needed: it's hers)"
 $vin = ("5YJ3E1EA7" + $suffix).Substring(0, 17)
@@ -126,6 +129,10 @@ $type2 = Api $olivia.Token Post "/stations/$($station.id)/connectors" @{ connect
 Write-Host "  station $($station.id)  $($station.name)"
 Write-Host "  CCS2    $($ccs.id)  150 kW   TYPE2 $($type2.id)  22 kW"
 Check "anyone can list the 2 connectors" ((Count (Api $null Get "/stations/$($station.id)/connectors")) -eq 2)
+ExpectError "Alice setting the station's prices" 403 (ApiError $alice.Token Put "/stations/$($station.id)/tariff" @{ currency = "GBP"; pricePerKwh = 0.01; pricePerMinute = 0; sessionFee = 0 })
+$tariff = Api $olivia.Token Put "/stations/$($station.id)/tariff" @{ currency = "GBP"; pricePerKwh = 0.45; pricePerMinute = 0.05; sessionFee = 0.50 }
+Write-Host "  tariff  GBP 0.45/kWh + 0.05/min + 0.50 per session"
+Check "anyone can read the prices before plugging in" ((Api $null Get "/stations/$($station.id)/tariff").id -eq $tariff.id)
 
 Step "4b. A driver searches for a fast CCS2 charger nearby (no login needed)"
 # 300 m north of the station, as if searching from the street
@@ -161,6 +168,8 @@ for ($i = 0; $i -lt 10; $i++) {
     Start-Sleep -Milliseconds 500
 }
 ExpectError "Bob walking up to Alice's reserved connector" 409 $held
+ExpectError "Bob charging before adding a card" 402 (ApiError $bob.Token Post "/charging/sessions" @{ stationId = $station.id; connectorId = $type2.id; vehicleId = $bobCar.id })
+Api $bob.Token Put "/payments/methods/me" @{ token = "tok_mastercard" } | Out-Null
 
 Step "7. Alice plugs in and starts charging against her reservation"
 $session = Api $alice.Token Post "/charging/sessions" @{ stationId = $station.id; connectorId = $ccs.id; vehicleId = $car.id; reservationId = $reservation.id }
@@ -183,6 +192,11 @@ Step "9. Alice unplugs"
 $stopped = Api $alice.Token Patch "/charging/sessions/$($session.id)/stop" @{ totalEnergyKwh = 42.75 }
 Write-Host "  session $($stopped.id)  $($stopped.status)  $($stopped.totalEnergyKwh) kWh"
 Check "session STOPPED with 42.75 kWh" ($stopped.status -eq "STOPPED" -and [decimal]$stopped.totalEnergyKwh -eq [decimal]42.75)
+Write-Host "  bill    $($stopped.currency) $($stopped.totalCost)"
+# 0.50 + 42.75 x 0.45 = 19.7375, plus a few seconds at 0.05/min
+Check "billed GBP 19.74-19.80 (fee + energy + time at the tariff it started under)" ($stopped.currency -eq "GBP" -and [decimal]$stopped.totalCost -ge 19.74 -and [decimal]$stopped.totalCost -le 19.80)
+$alicePayment = Api $alice.Token Get "/payments" | ForEach-Object { $_ } | Where-Object { $_.sessionId -eq $session.id }
+Check "her card was charged exactly the bill" ($alicePayment.status -eq "CAPTURED" -and [decimal]$alicePayment.capturedAmount -eq [decimal]$stopped.totalCost -and [decimal]$alicePayment.authorizedAmount -eq 50)
 ExpectError "stopping twice" 409 (ApiError $alice.Token Patch "/charging/sessions/$($session.id)/stop" @{ totalEnergyKwh = 1 })
 Check "her reservation is COMPLETED" ((Api $alice.Token Get "/reservations/$($reservation.id)").status -eq "COMPLETED")
 WaitFor "CCS2 connector is AVAILABLE again (not left RESERVED)" { (ConnectorStatus $station.id $ccs.id) -eq "AVAILABLE" }
@@ -197,6 +211,38 @@ WaitFor "both connectors AVAILABLE, and search offers the station again" {
 }
 Check "Olivia can list users" ((Count (Api $olivia.Token Get "/users")) -ge 2)
 ExpectError "Alice listing all users" 403 (ApiError $alice.Token Get "/users")
+
+Step "11. Payment problems are never silent"
+$carol = New-Account "Carol"
+$dave = New-Account "Dave"
+foreach ($who in $carol, $dave) { Api $who.Token Post "/users/me" @{} | Out-Null }
+Api $carol.Token Put "/payments/methods/me" @{ token = "tok_chargeDeclined" } | Out-Null
+Api $dave.Token Put "/payments/methods/me" @{ token = "tok_captureFails" } | Out-Null
+$carolCar = Api $carol.Token Post "/vehicles" @{ vin = ("WVWZZZE1Z" + $suffix).Substring(0, 17); make = "VW"; model = "ID.3" }
+$daveCar = Api $dave.Token Post "/vehicles" @{ vin = ("SALYA2BN1" + $suffix).Substring(0, 17); make = "Jaguar"; model = "I-Pace" }
+ExpectError "Carol's declined card stops the session starting" 402 (ApiError $carol.Token Post "/charging/sessions" @{ stationId = $station.id; connectorId = $ccs.id; vehicleId = $carolCar.id })
+Check "no session was created for Carol" ((Count (Api $carol.Token Get "/charging/sessions")) -eq 0)
+$carolPayment = Api $carol.Token Get "/payments" | ForEach-Object { $_ }
+Check "but the decline is on her record (FAILED, card_declined)" ((Count $carolPayment) -eq 1 -and $carolPayment.status -eq "FAILED" -and $carolPayment.failureCode -eq "card_declined")
+Check "the connector is still AVAILABLE" ((ConnectorStatus $station.id $ccs.id) -eq "AVAILABLE")
+$daveSession = Api $dave.Token Post "/charging/sessions" @{ stationId = $station.id; connectorId = $ccs.id; vehicleId = $daveCar.id }
+Check "Dave's hold succeeds, so he can charge" ($daveSession.status -eq "ACTIVE")
+$daveStopped = Api $dave.Token Patch "/charging/sessions/$($daveSession.id)/stop" @{ totalEnergyKwh = 10 }
+Write-Host "  session $($daveStopped.id)  $($daveStopped.status)  owes $($daveStopped.currency) $($daveStopped.totalCost)"
+Check "when the final charge fails, the session ends PAYMENT_FAILED, not STOPPED" ($daveStopped.status -eq "PAYMENT_FAILED" -and [decimal]$daveStopped.totalCost -gt 0)
+$davePayment = Api $dave.Token Get "/payments" | ForEach-Object { $_ }
+Check "his payment is FAILED (capture_failed)" ($davePayment.status -eq "FAILED" -and $davePayment.failureCode -eq "capture_failed")
+WaitFor "his connector is freed anyway" { (ConnectorStatus $station.id $ccs.id) -eq "AVAILABLE" }
+$unpriced = Api $olivia.Token Post "/stations" @{ externalReference = "ST-NP-$suffix"; name = "Unpriced $suffix"; countryCode = "GB"; latitude = $lat; longitude = $lng }
+$npConnector = Api $olivia.Token Post "/stations/$($unpriced.id)/connectors" @{ connectorType = "CCS2"; maxPowerKw = 50 }
+ExpectError "charging at a station with no prices set" 404 (ApiError $alice.Token Post "/charging/sessions" @{ stationId = $unpriced.id; connectorId = $npConnector.id; vehicleId = $car.id })
+
+Step "12. The operator refunds Alice"
+ExpectError "Alice refunding herself" 403 (ApiError $alice.Token Post "/payments/$($alicePayment.id)/refund" $null)
+$refund = Api $olivia.Token Post "/payments/$($alicePayment.id)/refund" $null
+Check "Olivia refunds Alice's payment" ($refund.status -eq "REFUNDED")
+ExpectError "refunding it twice" 409 (ApiError $olivia.Token Post "/payments/$($alicePayment.id)/refund" $null)
+ExpectError "refunding Dave's failed payment" 409 (ApiError $olivia.Token Post "/payments/$($davePayment.id)/refund" $null)
 
 Write-Host ""
 if ($script:failures -eq 0) {

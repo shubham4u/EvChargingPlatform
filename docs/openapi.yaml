@@ -310,6 +310,149 @@ paths:
                   $ref: '#/components/schemas/ConnectorResponse'
         '404':
           description: Station not found
+  /stations/{id}/tariff:
+    get:
+      summary: Current prices at a station
+      operationId: getTariff
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TariffResponse'
+        '404':
+          description: The station has no tariff yet
+    put:
+      summary: Set a station's prices (operator). Creates a new version; running sessions keep theirs.
+      operationId: setTariff
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TariffRequest'
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TariffResponse'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '404':
+          description: Station not found
+  /payments/methods/me:
+    put:
+      summary: Save your card (a provider token, never a card number)
+      operationId: setPaymentMethod
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+                  description: Simulated provider tokens are tok_visa, tok_mastercard, tok_chargeDeclined and tok_captureFails
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentMethodResponse'
+        '400':
+          description: Unknown card token
+    get:
+      summary: Your saved card
+      operationId: getPaymentMethod
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentMethodResponse'
+        '404':
+          description: No saved card
+  /payments:
+    get:
+      summary: Your payments (operators see all)
+      operationId: listPayments
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PaymentResponse'
+  /payments/{id}:
+    get:
+      summary: Get a payment
+      operationId: getPayment
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+        '404':
+          description: Payment not found
+  /payments/{id}/refund:
+    post:
+      summary: Refund a captured payment in full (operator)
+      operationId: refundPayment
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '200':
+          description: OK (status REFUNDED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+        '404':
+          description: Payment not found
+        '409':
+          description: The payment is not CAPTURED
   /reservations:
     post:
       summary: Create a reservation
@@ -437,8 +580,10 @@ paths:
                 $ref: '#/components/schemas/ChargingSessionResponse'
         '400':
           $ref: '#/components/responses/ValidationFailed'
+        '402':
+          description: No saved card, or the hold on it was declined (body has failureCode)
         '404':
-          description: User, vehicle, or connector at the station not found
+          description: User, vehicle, or connector at the station not found; or the station has no tariff
         '409':
           description: >
             Vehicle not owned by user; connector in use (active session, or held by another
@@ -496,7 +641,7 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '200':
-          description: OK (session is STOPPED)
+          description: OK. Session is STOPPED and paid, or PAYMENT_FAILED when the final charge could not be taken.
           content:
             application/json:
               schema:
@@ -822,7 +967,7 @@ components:
           nullable: true
         status:
           type: string
-          enum: [REQUESTED, ACTIVE, STOPPED]
+          enum: [REQUESTED, ACTIVE, STOPPED, PAYMENT_FAILED]
         startedAt:
           type: string
           format: date-time
@@ -832,6 +977,106 @@ components:
           nullable: true
         totalEnergyKwh:
           type: number
+          nullable: true
+        tariffId:
+          type: string
+          format: uuid
+          nullable: true
+          description: The tariff in force when the session started; it is billed at this one
+        totalCost:
+          type: number
+          nullable: true
+          description: Set when the session stops, including when payment then fails
+        currency:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    TariffRequest:
+      type: object
+      required: [currency, pricePerKwh, pricePerMinute, sessionFee]
+      properties:
+        currency:
+          type: string
+          description: ISO 4217 code, e.g. GBP
+        pricePerKwh:
+          type: number
+          minimum: 0
+          maximum: 100
+        pricePerMinute:
+          type: number
+          minimum: 0
+          maximum: 100
+        sessionFee:
+          type: number
+          minimum: 0
+          maximum: 1000
+    TariffResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        stationId:
+          type: string
+          format: uuid
+        currency:
+          type: string
+        pricePerKwh:
+          type: number
+        pricePerMinute:
+          type: number
+        sessionFee:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+    PaymentMethodResponse:
+      type: object
+      properties:
+        brand:
+          type: string
+        last4:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+    PaymentResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [AUTHORIZED, CAPTURED, REFUNDED, FAILED]
+        currency:
+          type: string
+        authorizedAmount:
+          type: number
+        capturedAmount:
+          type: number
+          nullable: true
+        cardBrand:
+          type: string
+        cardLast4:
+          type: string
+        failureCode:
+          type: string
+          nullable: true
+          description: e.g. card_declined, capture_failed, amount_exceeds_authorization
+        failureReason:
+          type: string
           nullable: true
         createdAt:
           type: string

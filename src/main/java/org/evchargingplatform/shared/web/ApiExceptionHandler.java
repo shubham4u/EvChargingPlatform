@@ -7,6 +7,10 @@ import org.evchargingplatform.charging.domain.exception.VehicleAlreadyChargingEx
 import org.evchargingplatform.identity.domain.exception.DuplicateUserException;
 import org.evchargingplatform.identity.domain.exception.UserAlreadyRegisteredException;
 import org.evchargingplatform.identity.domain.exception.UserNotFoundException;
+import org.evchargingplatform.payments.domain.exception.PaymentDeclinedException;
+import org.evchargingplatform.payments.domain.exception.PaymentMethodRequiredException;
+import org.evchargingplatform.payments.domain.exception.PaymentNotFoundException;
+import org.evchargingplatform.pricing.domain.exception.TariffNotFoundException;
 import org.evchargingplatform.reservation.domain.exception.ConnectorAlreadyReservedException;
 import org.evchargingplatform.reservation.domain.exception.ReservationAlreadyCancelledException;
 import org.evchargingplatform.reservation.domain.exception.ReservationAlreadyConfirmedException;
@@ -130,6 +134,30 @@ public class ApiExceptionHandler {
     @ExceptionHandler(VehicleAlreadyChargingException.class)
     ProblemDetail handleVehicleAlreadyCharging(VehicleAlreadyChargingException exception) {
         return problem(HttpStatus.CONFLICT, "Vehicle already charging", exception.getMessage());
+    }
+
+    // --- Pricing and payments ---
+
+    @ExceptionHandler(TariffNotFoundException.class)
+    ProblemDetail handleTariffNotFound(TariffNotFoundException exception) {
+        return problem(HttpStatus.NOT_FOUND, "Tariff not found", exception.getMessage());
+    }
+
+    @ExceptionHandler(PaymentMethodRequiredException.class)
+    ProblemDetail handlePaymentMethodRequired(PaymentMethodRequiredException exception) {
+        return problem(HttpStatus.PAYMENT_REQUIRED, "Payment method required", exception.getMessage());
+    }
+
+    @ExceptionHandler(PaymentDeclinedException.class)
+    ProblemDetail handlePaymentDeclined(PaymentDeclinedException exception) {
+        ProblemDetail problem = problem(HttpStatus.PAYMENT_REQUIRED, "Payment declined", exception.getMessage());
+        problem.setProperty("failureCode", exception.failureCode());
+        return problem;
+    }
+
+    @ExceptionHandler(PaymentNotFoundException.class)
+    ProblemDetail handlePaymentNotFound(PaymentNotFoundException exception) {
+        return problem(HttpStatus.NOT_FOUND, "Payment not found", exception.getMessage());
     }
 
     // --- Security ---

@@ -18,6 +18,9 @@ public record ChargingSessionResponse(
     Instant startedAt,
     Instant stoppedAt,
     BigDecimal totalEnergyKwh,
+    UUID tariffId,
+    BigDecimal totalCost,
+    String currency,
     Instant createdAt,
     Instant updatedAt) {
 
@@ -34,6 +37,9 @@ public record ChargingSessionResponse(
             session.startedAt(),
             session.stoppedAt(),
             session.totalEnergyKwh(),
+            session.tariffId(),
+            session.totalCost(),
+            session.currency(),
             session.createdAt(),
             session.updatedAt()
         );

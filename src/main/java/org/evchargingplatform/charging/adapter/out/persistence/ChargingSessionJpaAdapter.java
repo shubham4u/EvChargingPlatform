@@ -62,6 +62,9 @@ public class ChargingSessionJpaAdapter implements ChargingSessionRepository {
                 save.startedAt(),
                 save.stoppedAt(),
                 save.totalEnergyKwh(),
+                save.tariffId(),
+                save.totalCost(),
+                save.currency(),
                 save.createdAt(),
                 save.updatedAt()
         );
@@ -95,6 +98,9 @@ public class ChargingSessionJpaAdapter implements ChargingSessionRepository {
                 chargingSession.startedAt(),
                 chargingSession.stoppedAt(),
                 chargingSession.totalEnergyKwh(),
+                chargingSession.tariffId(),
+                chargingSession.totalCost(),
+                chargingSession.currency(),
                 chargingSession.createdAt(),
                 chargingSession.updatedAt(),
                 currentVersion(chargingSession.id())

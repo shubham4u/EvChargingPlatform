@@ -87,6 +87,39 @@ class UserControllerTest {
         // What Windows PowerShell's Invoke-RestMethod -Method Post sends when there is no -Body
         mockMvc.perform(post("/users/me").with(driver(USER_ID)).contentType(MediaType.APPLICATION_FORM_URLENCODED))
                 .andExpect(status().isCreated());
+        // What most HTTP clients send once the JSON header is set but there's nothing to post
+        mockMvc.perform(post("/users/me").with(driver(UUID.randomUUID())).contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isCreated());
+        mockMvc.perform(post("/users/me").with(driver(UUID.randomUUID())).contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    @DisplayName("POST /users/me should use a displayName from the body over the token's name")
+    void shouldUseBodyDisplayName() throws Exception {
+        when(registerUserUseCase.register(any(RegisterUserCommand.class))).thenReturn(user);
+
+        mockMvc.perform(post("/users/me").with(driver(USER_ID))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"displayName\":\"Ali\"}"))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<RegisterUserCommand> captor = ArgumentCaptor.forClass(RegisterUserCommand.class);
+        verify(registerUserUseCase).register(captor.capture());
+        assertEquals("Ali", captor.getValue().displayName());
+    }
+
+    @Test
+    @DisplayName("POST /users/me should return 400 for a body that isn't valid JSON or breaks a size limit")
+    void shouldReturn400ForBadBody() throws Exception {
+        mockMvc.perform(post("/users/me").with(driver(USER_ID))
+                        .contentType(MediaType.APPLICATION_JSON).content("{not json"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Invalid request"));
+        mockMvc.perform(post("/users/me").with(driver(USER_ID))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"phoneNumber\":\"" + "9".repeat(31) + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.startsWith("phoneNumber")));
+        verify(registerUserUseCase, org.mockito.Mockito.never()).register(any());
     }
 
     @Test

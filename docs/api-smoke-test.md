@@ -28,17 +28,16 @@ This starts the API (8080), Keycloak (8081), Postgres, Redis, Kafka and Jaeger. 
 
 If PowerShell blocks scripts, run `powershell -ExecutionPolicy Bypass -File .\scripts\demo-flow.ps1`.
 
-Each run creates three fresh Keycloak accounts (drivers Alice and Bob, operator Olivia) with random passwords, signs them in, and makes 43 checks. It covers the happy path, every rule that should refuse a request, and who may do what: no token → 401, Bob touching Alice's things → 403, a driver creating a station → 403. It exits `0` when everything passes. Expected tail:
+Each run creates fresh Keycloak accounts (drivers Alice, Bob, Carol and Dave, operator Olivia) with random passwords, signs them in, and makes 63 checks, covering pricing and every payment outcome. It covers the happy path, every rule that should refuse a request, and who may do what: no token → 401, Bob touching Alice's things → 403, a driver creating a station → 403. It exits `0` when everything passes. Expected tail:
 
 ```
-== 10. The operator can see and act on everything; drivers can't
-  [PASS] Olivia sees both sessions at her new station
-  [PASS] Olivia stops Bob's session
-  [PASS] both connectors AVAILABLE, and search offers the station again
-  [PASS] Olivia can list users
-  [PASS] Alice listing all users -> 403 Forbidden
+== 12. The operator refunds Alice
+  [PASS] Alice refunding herself -> 403 Forbidden
+  [PASS] Olivia refunds Alice's payment
+  [PASS] refunding it twice -> 409 Invalid state transition
+  [PASS] refunding Dave's failed payment -> 409 Invalid state transition
 
-All 43 checks passed.
+All 63 checks passed.
 ```
 
 ## 4. Or step through it by hand
@@ -64,16 +63,19 @@ Operator sets up a station:
 ```powershell
 $station = Call $olivia Post "/stations" @{ externalReference = "ST-001"; name = "Kings Cross Hub"; countryCode = "GB"; latitude = 51.5308; longitude = -0.1238 }
 $ccs     = Call $olivia Post "/stations/$($station.id)/connectors" @{ connectorType = "CCS2"; maxPowerKw = 150 }
+Call $olivia Put "/stations/$($station.id)/tariff" @{ currency = "GBP"; pricePerKwh = 0.45; pricePerMinute = 0.05; sessionFee = 0.50 }
 ```
 
 Alice creates her profile, adds her car, and charges. There is no `userId` anywhere: the API takes it from her token.
 
 ```powershell
 Call $alice Post "/users/me" @{ phoneNumber = "+44 7700 900123" }
+Call $alice Put "/payments/methods/me" @{ token = "tok_visa" }       # a test card; see "Payments" below
 $car     = Call $alice Post "/vehicles" @{ vin = "5YJ3E1EA7KF317000"; make = "Tesla"; model = "Model 3" }
 $session = Call $alice Post "/charging/sessions" @{ stationId = $station.id; connectorId = $ccs.id; vehicleId = $car.id }
 $session.status                                                     # ACTIVE
-Call $alice Patch "/charging/sessions/$($session.id)/stop" @{ totalEnergyKwh = 42.75 }
+Call $alice Patch "/charging/sessions/$($session.id)/stop" @{ totalEnergyKwh = 42.75 }   # status STOPPED, totalCost ~19.74 GBP
+Call $alice Get "/payments"                                         # CAPTURED, capturedAmount = the bill
 Call $alice Get "/charging/sessions"                                # only Alice's sessions
 ```
 
@@ -98,6 +100,18 @@ curl.exe -s "$api/stations" -X POST -H "Authorization: Bearer $($alice.Token)" -
 
 Errors are problem-detail JSON, for example `{"title":"Forbidden","status":403,...}`. Windows PowerShell 5.1 doesn't put that body in `$_.ErrorDetails`, which is why the examples above use `curl.exe` to show it.
 
+### Payments
+
+There is no real card processing. The simulated provider has test tokens that produce each outcome:
+
+| Token | What happens |
+|---|---|
+| `tok_visa`, `tok_mastercard` | Hold and charge succeed |
+| `tok_chargeDeclined` | The £50 hold is declined, so the start returns `402 Payment declined` and no session is created. The decline still shows in `GET /payments`. |
+| `tok_captureFails` | Charging starts, but the final charge fails, so the session ends `PAYMENT_FAILED` (not `STOPPED`). The connector is still freed. |
+
+Without a saved card, starting returns `402 Payment method required`. At a station with no tariff, it returns `404 Tariff not found`. Operators refund with `Call $olivia Post "/payments/<id>/refund"`.
+
 ### Looking inside a token
 
 ```powershell
@@ -116,7 +130,7 @@ The admin console is at http://localhost:8081 (user `admin`, password from `.env
 docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic charging.events.v1 --from-beginning --timeout-ms 10000 --property print.key=true
 ```
 
-Topics: `user.events.v1`, `vehicle.events.v1`, `station.events.v1`, `reservation.events.v1`, `charging.events.v1`. The `TimeoutException` printed at the end is how `--timeout-ms` exits.
+Topics: `user.events.v1`, `vehicle.events.v1`, `station.events.v1`, `reservation.events.v1`, `charging.events.v1`, `payment.events.v1`. The `TimeoutException` printed at the end is how `--timeout-ms` exits.
 
 ## 6. Check the database
 

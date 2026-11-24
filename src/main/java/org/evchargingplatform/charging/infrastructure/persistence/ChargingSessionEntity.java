@@ -28,6 +28,9 @@ public class ChargingSessionEntity {
     Instant startedAt;
     Instant stoppedAt;
     BigDecimal totalEnergyKwh;
+    UUID tariffId;
+    BigDecimal totalCost;
+    String currency;
     Instant createdAt;
     Instant updatedAt;
     
@@ -39,7 +42,8 @@ public class ChargingSessionEntity {
 
     public ChargingSessionEntity(UUID id, String chargingSessionNumber, UUID stationId, UUID connectorId,
             UUID userId, UUID vehicleId, UUID reservationId, String status, Instant startedAt, Instant stoppedAt,
-            BigDecimal totalEnergyKwh, Instant createdAt, Instant updatedAt, long version) {
+            BigDecimal totalEnergyKwh, UUID tariffId, BigDecimal totalCost, String currency,
+            Instant createdAt, Instant updatedAt, long version) {
         this.id = id;
         this.chargingSessionNumber = chargingSessionNumber;
         this.stationId = stationId;
@@ -51,6 +55,9 @@ public class ChargingSessionEntity {
         this.startedAt = startedAt;
         this.stoppedAt = stoppedAt;
         this.totalEnergyKwh = totalEnergyKwh;
+        this.tariffId = tariffId;
+        this.totalCost = totalCost;
+        this.currency = currency;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
         this.version = version;
@@ -98,6 +105,18 @@ public class ChargingSessionEntity {
 
     public BigDecimal totalEnergyKwh() {
         return totalEnergyKwh;
+    }
+
+    public UUID tariffId() {
+        return tariffId;
+    }
+
+    public BigDecimal totalCost() {
+        return totalCost;
+    }
+
+    public String currency() {
+        return currency;
     }
 
     public Instant createdAt() {
