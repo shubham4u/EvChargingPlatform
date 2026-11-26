@@ -25,4 +25,14 @@ public interface ChargingPaymentUseCase {
      * {@code CAPTURED} or {@code FAILED}, and the caller decides what that means for the session.
      */
     PaymentIntent capture(UUID sessionId, BigDecimal amount);
+
+    /**
+     * Collects the amount owed for a session whose capture failed, with the card the driver has on file
+     * now. Like {@link #capture}, it doesn't throw for a provider problem: the intent comes back
+     * {@code CAPTURED} or still {@code FAILED}.
+     *
+     * @throws PaymentMethodRequiredException if the user has no card
+     * @throws IllegalStateException          if the session's payment isn't FAILED
+     */
+    PaymentIntent collectOutstanding(UUID sessionId, BigDecimal amount);
 }

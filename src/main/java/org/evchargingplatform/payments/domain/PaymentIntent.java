@@ -45,6 +45,18 @@ public record PaymentIntent(UUID id, UUID sessionId, UUID userId, PaymentStatus 
         return with(PaymentStatus.FAILED, null, code, reason, clock);
     }
 
+    /** A failed capture, later paid with the card now on file: a fresh charge for the amount owed. */
+    public PaymentIntent recovered(PaymentMethod card, String newProviderReference, BigDecimal amount, Clock clock) {
+        require(PaymentStatus.FAILED, "recover");
+        return new PaymentIntent(id, sessionId, userId, PaymentStatus.CAPTURED, currency, amount, amount, card.token(),
+                card.brand(), card.last4(), newProviderReference, null, null, createdAt, Instant.now(clock));
+    }
+
+    public PaymentIntent stillFailing(String code, String reason, Clock clock) {
+        require(PaymentStatus.FAILED, "retry");
+        return with(PaymentStatus.FAILED, null, code, reason, clock);
+    }
+
     public PaymentIntent refunded(Clock clock) {
         require(PaymentStatus.CAPTURED, "refund");
         return with(PaymentStatus.REFUNDED, capturedAmount, null, null, clock);

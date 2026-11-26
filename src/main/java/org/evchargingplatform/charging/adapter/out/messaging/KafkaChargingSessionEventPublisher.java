@@ -6,7 +6,7 @@ import org.evchargingplatform.events.charging.v1.ChargingSessionRequestedEvent;
 import org.evchargingplatform.events.charging.v1.ChargingSessionStartedEvent;
 import org.evchargingplatform.events.charging.v1.ChargingSessionStoppedEvent;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.kafka.core.KafkaTemplate;
+import org.evchargingplatform.shared.outbox.EventOutbox;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -15,7 +15,7 @@ import java.util.UUID;
 /**
  * Kafka adapter for the {@link ChargingSessionEventPublisher} port.
  * <p>
- * Publishes immutable version-one charging session lifecycle events to Kafka.
+ * Writes immutable version-one charging session lifecycle events to Kafka.
  * Enabled only when {@code app.messaging.enabled=true} so the service
  * starts cleanly without Kafka in development.
  */
@@ -23,13 +23,13 @@ import java.util.UUID;
 @ConditionalOnProperty(name = "app.messaging.enabled", havingValue = "true")
 public class KafkaChargingSessionEventPublisher implements ChargingSessionEventPublisher {
 
-    private final KafkaTemplate<Object, Object> kafkaTemplate;
+    private final EventOutbox outbox;
     private final String chargingEventsTopic;
 
     public KafkaChargingSessionEventPublisher(
-            KafkaTemplate<Object, Object> kafkaTemplate,
+            EventOutbox outbox,
             @org.springframework.beans.factory.annotation.Value("${app.messaging.charging-events-topic:charging.events.v1}") String chargingEventsTopic) {
-        this.kafkaTemplate = kafkaTemplate;
+        this.outbox = outbox;
         this.chargingEventsTopic = chargingEventsTopic;
     }
 
@@ -39,7 +39,7 @@ public class KafkaChargingSessionEventPublisher implements ChargingSessionEventP
                 UUID.randomUUID(), ChargingSessionRequestedEvent.VERSION, UUID.randomUUID(), null, Instant.now(),
                 session.id(), session.userId(), session.stationId(), session.connectorId(),
                 session.reservationId());
-        kafkaTemplate.send(chargingEventsTopic, session.id().toString(), event);
+        outbox.send(chargingEventsTopic, session.id().toString(), event);
     }
 
     @Override
@@ -48,7 +48,7 @@ public class KafkaChargingSessionEventPublisher implements ChargingSessionEventP
                 UUID.randomUUID(), ChargingSessionStartedEvent.VERSION, UUID.randomUUID(), null, Instant.now(),
                 session.id(), session.userId(), session.stationId(), session.connectorId(),
                 session.startedAt());
-        kafkaTemplate.send(chargingEventsTopic, session.id().toString(), event);
+        outbox.send(chargingEventsTopic, session.id().toString(), event);
     }
 
     @Override
@@ -57,6 +57,6 @@ public class KafkaChargingSessionEventPublisher implements ChargingSessionEventP
                 UUID.randomUUID(), ChargingSessionStoppedEvent.VERSION, UUID.randomUUID(), null, Instant.now(),
                 session.id(), session.userId(), session.stationId(), session.connectorId(),
                 session.stoppedAt(), session.totalEnergyKwh());
-        kafkaTemplate.send(chargingEventsTopic, session.id().toString(), event);
+        outbox.send(chargingEventsTopic, session.id().toString(), event);
     }
 }

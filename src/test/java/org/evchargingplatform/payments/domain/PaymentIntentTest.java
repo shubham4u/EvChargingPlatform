@@ -54,6 +54,19 @@ class PaymentIntentTest {
     }
 
     @Test
+    @DisplayName("a failed capture can be recovered with another card, and only a FAILED one")
+    void shouldRecover() {
+        PaymentMethod newCard = new PaymentMethod(CARD.userId(), "tok_mastercard", "mastercard", "4444", CLOCK.instant());
+        PaymentIntent recovered = authorized().captureFailed("capture_failed", "no", CLOCK)
+                .recovered(newCard, "ref2", new BigDecimal("5.00"), CLOCK);
+
+        assertEquals(PaymentStatus.CAPTURED, recovered.status());
+        assertEquals("4444", recovered.cardLast4());
+        assertNull(recovered.failureCode());
+        assertThrows(IllegalStateException.class, () -> authorized().recovered(newCard, "r", BigDecimal.ONE, CLOCK));
+    }
+
+    @Test
     @DisplayName("a declined hold is FAILED from the start, with the reason")
     void shouldRecordDecline() {
         PaymentIntent declined = PaymentIntent.declined(UUID.randomUUID(), CARD.userId(), "GBP", new BigDecimal("50.00"),

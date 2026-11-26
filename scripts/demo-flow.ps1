@@ -278,6 +278,39 @@ Check "report: 3 sessions (Carol never started), 2 paid, 1 payment failure" ($re
 Check "report: revenue = Bob's bill, refunded = Alice's, outstanding = Dave's" ([decimal]$report.revenue -eq [decimal]$bobStopped.totalCost -and [decimal]$report.refunded -eq [decimal]$stopped.totalCost -and [decimal]$report.outstanding -eq [decimal]$daveStopped.totalCost)
 ExpectError "Bob reading the station report" 403 (ApiError $bob.Token Get "/reports/stations/$($station.id)" $null)
 
+Step "14. Dave fixes his card and pays what he owes"
+ExpectError "paying with the card that already failed" 402 (ApiError $dave.Token Post "/charging/sessions/$($daveSession.id)/pay" $null)
+Api $dave.Token Put "/payments/methods/me" @{ token = "tok_visa" } | Out-Null
+$davePaid = Api $dave.Token Post "/charging/sessions/$($daveSession.id)/pay" $null
+Check "his session is now a normal paid stop (STOPPED)" ($davePaid.status -eq "STOPPED")
+Check "his payment is CAPTURED for exactly what he owed" ((Api $dave.Token Get "/payments" | ForEach-Object { $_ } | Where-Object { $_.sessionId -eq $daveSession.id }).status -eq "CAPTURED")
+ExpectError "paying twice" 409 (ApiError $dave.Token Post "/charging/sessions/$($daveSession.id)/pay" $null)
+$after = Api $olivia.Token Get "/reports/stations/$($station.id)"
+Check "report: nothing outstanding, revenue now includes Dave" ([decimal]$after.outstanding -eq 0 -and [decimal]$after.revenue -eq ([decimal]$bobStopped.totalCost + [decimal]$daveStopped.totalCost))
+WaitFor "Dave was told the payment went through" { ((Api $dave.Token Get "/notifications" | ForEach-Object { $_ }).type -contains "PAYMENT_RECEIVED") }
+
+Step "15. Two drivers grab the same free connector at the same instant"
+# Both requests pass the "is it free?" check; the database must still let only one of them in.
+Add-Type -AssemblyName System.Net.Http
+$client = New-Object System.Net.Http.HttpClient
+function StartAsync($who, $vehicleId) {
+    $request = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::Post, "$BaseUrl/charging/sessions")
+    $request.Headers.Authorization = New-Object System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", $who.Token)
+    $json = @{ stationId = $station.id; connectorId = $type2.id; vehicleId = $vehicleId } | ConvertTo-Json -Compress
+    $request.Content = New-Object System.Net.Http.StringContent($json, [System.Text.Encoding]::UTF8, "application/json")
+    return $client.SendAsync($request)
+}
+# Carol's card was the declined test card; give her a working one so she is a real contender.
+Api $carol.Token Put "/payments/methods/me" @{ token = "tok_visa" } | Out-Null
+$race = @((StartAsync $alice $car.id), (StartAsync $carol $carolCar.id))
+[System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]$race)
+$codes = $race | ForEach-Object { [int]$_.Result.StatusCode } | Sort-Object
+Write-Host "  results $($codes -join ', ')"
+Check "exactly one wins (201) and the other gets 409 Connector in use" (($codes -join ',') -eq "201,409")
+$winner = Api $olivia.Token Get "/charging/sessions" | ForEach-Object { $_ } | Where-Object { $_.connectorId -eq $type2.id -and $_.status -eq "ACTIVE" }
+Check "and only one session is open on that connector" ((Count $winner) -eq 1)
+Api $olivia.Token Patch "/charging/sessions/$($winner.id)/stop" @{ totalEnergyKwh = 1 } | Out-Null
+
 Write-Host ""
 if ($script:failures -eq 0) {
     Write-Host "All $($script:checks) checks passed." -ForegroundColor Green

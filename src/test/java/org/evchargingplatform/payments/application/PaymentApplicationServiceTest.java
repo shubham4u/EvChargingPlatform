@@ -126,8 +126,10 @@ class PaymentApplicationServiceTest {
             ArgumentCaptor<PaymentIntent> captor = ArgumentCaptor.forClass(PaymentIntent.class);
             verify(declinedRecorder).record(captor.capture());
             assertEquals(PaymentStatus.FAILED, captor.getValue().status());
-            verify(publisher).paymentFailed(captor.getValue());
-            verify(intents, never()).save(any());   // not in the transaction that is about to roll back
+            // Neither the record nor its event may live in the transaction that is about to roll back:
+            // the recorder saves and publishes both in its own (see TransactionalDeclinedPaymentRecorderTest).
+            verify(intents, never()).save(any());
+            verifyNoInteractions(publisher);
         }
     }
 
@@ -181,6 +183,56 @@ class PaymentApplicationServiceTest {
             assertSame(captured, service.capture(SESSION, BigDecimal.TEN));
             verify(intents, never()).save(any());
             verifyNoInteractions(publisher);
+        }
+    }
+
+    @Nested
+    @DisplayName("collecting what a failed session owes")
+    class CollectOutstanding {
+
+        private PaymentIntent failedCapture() {
+            PaymentIntent failed = PaymentIntent.authorized(SESSION, USER, "GBP", HOLD,
+                    new PaymentMethod(USER, "tok_captureFails", "visa", "0341", CLOCK.instant()), "sim_auth", CLOCK)
+                    .captureFailed("capture_failed", "rejected", CLOCK);
+            when(intents.findBySessionId(SESSION)).thenReturn(Optional.of(failed));
+            lenient().when(intents.save(any(PaymentIntent.class))).thenAnswer(invocation -> invocation.getArgument(0));
+            return failed;
+        }
+
+        @Test
+        @DisplayName("charges the card now on file and publishes PaymentCaptured")
+        void shouldCollectWithNewCard() {
+            failedCapture();
+            card("tok_visa");
+
+            PaymentIntent result = service.collectOutstanding(SESSION, new BigDecimal("5.00"));
+
+            assertEquals(PaymentStatus.CAPTURED, result.status());
+            assertEquals(new BigDecimal("5.00"), result.capturedAmount());
+            assertEquals("4242", result.cardLast4());
+            assertNull(result.failureCode());
+            verify(publisher).paymentCaptured(result);
+        }
+
+        @Test
+        @DisplayName("stays FAILED, with the new reason, if the card still can't pay")
+        void shouldStayFailed() {
+            failedCapture();
+            card("tok_chargeDeclined");
+
+            PaymentIntent result = service.collectOutstanding(SESSION, new BigDecimal("5.00"));
+
+            assertEquals(PaymentStatus.FAILED, result.status());
+            assertEquals("card_declined", result.failureCode());
+            verifyNoInteractions(publisher);
+        }
+
+        @Test
+        @DisplayName("refuses when nothing is owed")
+        void shouldRefuseWhenNotFailed() {
+            authorizedWith("tok_visa");
+
+            assertThrows(IllegalStateException.class, () -> service.collectOutstanding(SESSION, BigDecimal.ONE));
         }
     }
 

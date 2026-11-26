@@ -72,6 +72,14 @@ public record ChargingSession(UUID id, String chargingSessionNumber, UUID statio
         return copy(ChargingSessionStatus.PAYMENT_FAILED, startedAt, stoppedAt, totalEnergyKwh, clock);
     }
 
+    /** The amount owed was collected later: the session becomes a normal, paid stop. */
+    public ChargingSession paymentRecovered(Clock clock) {
+        if (status != ChargingSessionStatus.PAYMENT_FAILED) {
+            throw new IllegalStateException("Nothing is owed on this session; it is " + status);
+        }
+        return copy(ChargingSessionStatus.STOPPED, startedAt, stoppedAt, totalEnergyKwh, clock);
+    }
+
     private ChargingSession copy(ChargingSessionStatus newStatus, Instant newStartedAt, Instant newStoppedAt,
             BigDecimal newTotalEnergyKwh, Clock clock) {
         return new ChargingSession(id, chargingSessionNumber, stationId, connectorId, userId, vehicleId,
