@@ -244,6 +244,40 @@ Check "Olivia refunds Alice's payment" ($refund.status -eq "REFUNDED")
 ExpectError "refunding it twice" 409 (ApiError $olivia.Token Post "/payments/$($alicePayment.id)/refund" $null)
 ExpectError "refunding Dave's failed payment" 409 (ApiError $olivia.Token Post "/payments/$($davePayment.id)/refund" $null)
 
+Step "13. Everyone is told, and everything is on the record"
+# Notifications and the audit are built from events, so give the consumers a moment.
+WaitFor "Alice's inbox: reservation confirmed, charging finished, payment received, refund issued" {
+    $types = (Api $alice.Token Get "/notifications" | ForEach-Object { $_ }).type
+    ($types -contains "RESERVATION_CONFIRMED") -and ($types -contains "CHARGING_FINISHED") -and ($types -contains "PAYMENT_RECEIVED") -and ($types -contains "REFUND_ISSUED")
+}
+WaitFor "Carol was told her card was declined" { (Api $carol.Token Get "/notifications" | ForEach-Object { $_ }).type -contains "PAYMENT_DECLINED" }
+WaitFor "Dave was told his payment failed and to update his card" {
+    $n = Api $dave.Token Get "/notifications" | ForEach-Object { $_ } | Where-Object { $_.type -eq "PAYMENT_FAILED" }
+    $null -ne $n -and $n.body -like "*update your card*"
+}
+$unreadBefore = Count (Api $alice.Token Get "/notifications?unread=true")
+$first = Api $alice.Token Get "/notifications" | ForEach-Object { $_ } | Select-Object -First 1
+Api $alice.Token Patch "/notifications/$($first.id)/read" $null | Out-Null
+Check "marking one read leaves one fewer unread" ((Count (Api $alice.Token Get "/notifications?unread=true")) -eq $unreadBefore - 1)
+ExpectError "Bob marking Alice's notification read" 403 (ApiError $bob.Token Patch "/notifications/$($first.id)/read" $null)
+
+$expected = "PaymentAuthorizedEvent", "ChargingSessionRequestedEvent", "ChargingSessionStartedEvent", "PaymentCapturedEvent", "ChargingSessionStoppedEvent", "PaymentRefundedEvent"
+WaitFor "the audit trail for Alice's session has all 6 events, each with a trace id" {
+    $trail = Api $olivia.Token Get "/audit/events?key=$($session.id)" | ForEach-Object { $_ }
+    $types = $trail.eventType
+    (@($expected | Where-Object { $types -notcontains $_ }).Count -eq 0) -and (@($trail | Where-Object { -not $_.traceId }).Count -eq 0)
+}
+$trail = Api $olivia.Token Get "/audit/events?key=$($session.id)" | ForEach-Object { $_ }
+Write-Host "  audit   $(($trail.eventType) -join ' > ')"
+Check "start, stop and refund are three requests, so three trace ids" ((@($trail.traceId | Select-Object -Unique)).Count -eq 3)
+ExpectError "Alice reading the audit" 403 (ApiError $alice.Token Get "/audit/events?key=$($session.id)" $null)
+
+$report = Api $olivia.Token Get "/reports/stations/$($station.id)"
+Write-Host "  report  $($report.sessions) sessions, $($report.energyKwh) kWh, revenue $($report.revenue), refunded $($report.refunded), outstanding $($report.outstanding) $($report.currency)"
+Check "report: 3 sessions (Carol never started), 2 paid, 1 payment failure" ($report.sessions -eq 3 -and $report.paidSessions -eq 2 -and $report.paymentFailures -eq 1)
+Check "report: revenue = Bob's bill, refunded = Alice's, outstanding = Dave's" ([decimal]$report.revenue -eq [decimal]$bobStopped.totalCost -and [decimal]$report.refunded -eq [decimal]$stopped.totalCost -and [decimal]$report.outstanding -eq [decimal]$daveStopped.totalCost)
+ExpectError "Bob reading the station report" 403 (ApiError $bob.Token Get "/reports/stations/$($station.id)" $null)
+
 Write-Host ""
 if ($script:failures -eq 0) {
     Write-Host "All $($script:checks) checks passed." -ForegroundColor Green

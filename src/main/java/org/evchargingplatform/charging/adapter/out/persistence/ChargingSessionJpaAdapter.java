@@ -1,5 +1,6 @@
 package org.evchargingplatform.charging.adapter.out.persistence;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -31,6 +32,12 @@ public class ChargingSessionJpaAdapter implements ChargingSessionRepository {
     @Override
     public List<ChargingSession> findByUserId(UUID userId) {
         return repository.findByUserIdOrderByCreatedAtDesc(userId).stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public List<ChargingSession> findByStation(UUID stationId, Instant from, Instant to) {
+        return repository.findByStationIdAndCreatedAtGreaterThanEqualAndCreatedAtLessThan(stationId, from, to)
+                .stream().map(this::toDomain).toList();
     }
 
     @Override

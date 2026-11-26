@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -145,6 +146,12 @@ public class PaymentApplicationService implements ManagePaymentMethodUseCase, Ch
     @Transactional(readOnly = true)
     public List<PaymentIntent> findByUser(UUID userId) {
         return intents.findByUserId(userId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<PaymentIntent> findBySessions(Collection<UUID> sessionIds) {
+        return intents.findBySessionIds(sessionIds);
     }
 
     @Override

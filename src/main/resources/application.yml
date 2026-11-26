@@ -1,3 +1,11 @@
+server:
+  servlet:
+    encoding:
+      # Say "charset=UTF-8" explicitly. JSON is UTF-8 by spec, but some clients (Windows PowerShell 5.1)
+      # otherwise decode it as Latin-1 and show "£" as "Â£".
+      charset: UTF-8
+      force-response: true
+
 spring:
   application:
     name: station-service
@@ -32,6 +40,12 @@ spring:
           jwk-set-uri: ${OIDC_JWK_SET_URI:http://localhost:8081/realms/ev-charging/protocol/openid-connect/certs}
           audiences: ${OIDC_AUDIENCE:ev-platform-api}
   kafka:
+    # Propagate the trace (W3C traceparent header) from the API request into every event and listener,
+    # so the audit can link an event to the request that caused it.
+    template:
+      observation-enabled: true
+    listener:
+      observation-enabled: true
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer

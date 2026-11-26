@@ -126,6 +126,11 @@ StartChargingSessionUseCase, StopChargingSessionUseCase, GetChargingSessionUseCa
     }
 
     @Override
+    public List<ChargingSession> findByStation(UUID stationId, Instant from, Instant to) {
+        return chargingSessionRepository.findByStation(stationId, from, to);
+    }
+
+    @Override
     public ChargingSession findById(UUID chargingSessionId) {
         return chargingSessionRepository.findById(chargingSessionId)
                 .orElseThrow(() -> new ChargingSessionNotFoundException(chargingSessionId));

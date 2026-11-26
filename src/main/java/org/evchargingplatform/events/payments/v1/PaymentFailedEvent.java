@@ -14,7 +14,8 @@ public record PaymentFailedEvent(
         UUID paymentIntentId,
         UUID sessionId,
         String failureCode,
-        String failureReason
+        String failureReason,
+        UUID userId     // added in Sprint 10 so consumers needn't look the payment up
 ) implements DomainEvent {
     public static final int VERSION = 1;
 }

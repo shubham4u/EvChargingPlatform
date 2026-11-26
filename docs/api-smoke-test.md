@@ -28,16 +28,16 @@ This starts the API (8080), Keycloak (8081), Postgres, Redis, Kafka and Jaeger. 
 
 If PowerShell blocks scripts, run `powershell -ExecutionPolicy Bypass -File .\scripts\demo-flow.ps1`.
 
-Each run creates fresh Keycloak accounts (drivers Alice, Bob, Carol and Dave, operator Olivia) with random passwords, signs them in, and makes 63 checks, covering pricing and every payment outcome. It covers the happy path, every rule that should refuse a request, and who may do what: no token → 401, Bob touching Alice's things → 403, a driver creating a station → 403. It exits `0` when everything passes. Expected tail:
+Each run creates fresh Keycloak accounts (drivers Alice, Bob, Carol and Dave, operator Olivia) with random passwords, signs them in, and makes 74 checks, covering pricing, every payment outcome, notifications, the audit trail and the station report. It covers the happy path, every rule that should refuse a request, and who may do what: no token → 401, Bob touching Alice's things → 403, a driver creating a station → 403. It exits `0` when everything passes. Expected tail:
 
 ```
-== 12. The operator refunds Alice
-  [PASS] Alice refunding herself -> 403 Forbidden
-  [PASS] Olivia refunds Alice's payment
-  [PASS] refunding it twice -> 409 Invalid state transition
-  [PASS] refunding Dave's failed payment -> 409 Invalid state transition
+== 13. Everyone is told, and everything is on the record
+  audit   PaymentAuthorizedEvent > ChargingSessionRequestedEvent > ChargingSessionStartedEvent > PaymentCapturedEvent > ChargingSessionStoppedEvent > PaymentRefundedEvent
+  [PASS] start, stop and refund are three requests, so three trace ids
+  report  3 sessions, ... revenue ..., refunded ..., outstanding ... GBP
+  [PASS] report: revenue = Bob's bill, refunded = Alice's, outstanding = Dave's
 
-All 63 checks passed.
+All 74 checks passed.
 ```
 
 ## 4. Or step through it by hand
@@ -111,6 +111,16 @@ There is no real card processing. The simulated provider has test tokens that pr
 | `tok_captureFails` | Charging starts, but the final charge fails, so the session ends `PAYMENT_FAILED` (not `STOPPED`). The connector is still freed. |
 
 Without a saved card, starting returns `402 Payment method required`. At a station with no tariff, it returns `404 Tariff not found`. Operators refund with `Call $olivia Post "/payments/<id>/refund"`.
+
+### Notifications, audit and reports
+
+```powershell
+Call $alice Get "/notifications" | Format-Table type, title, body                 # e.g. PAYMENT_RECEIVED "£19.74 was charged to your card."
+Call $olivia Get "/audit/events?key=$($session.id)" | Format-Table eventType, traceId
+Call $olivia Get "/reports/stations/$($station.id)"
+```
+
+Open any `traceId` at `http://localhost:16686/trace/<traceId>` to see the request behind it. Spans are exported every few seconds, so a brand-new trace can take a moment to appear.
 
 ### Looking inside a token
 

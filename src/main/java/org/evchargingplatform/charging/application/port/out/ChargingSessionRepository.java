@@ -1,5 +1,6 @@
 package org.evchargingplatform.charging.application.port.out;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -11,6 +12,8 @@ public interface ChargingSessionRepository {
     List<ChargingSession> findAll();
 
     List<ChargingSession> findByUserId(UUID userId);
+
+    List<ChargingSession> findByStation(UUID stationId, Instant from, Instant to);
 
     Optional<ChargingSession> findById(UUID id);
 

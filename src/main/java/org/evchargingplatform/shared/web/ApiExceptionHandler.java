@@ -7,6 +7,7 @@ import org.evchargingplatform.charging.domain.exception.VehicleAlreadyChargingEx
 import org.evchargingplatform.identity.domain.exception.DuplicateUserException;
 import org.evchargingplatform.identity.domain.exception.UserAlreadyRegisteredException;
 import org.evchargingplatform.identity.domain.exception.UserNotFoundException;
+import org.evchargingplatform.notifications.domain.exception.NotificationNotFoundException;
 import org.evchargingplatform.payments.domain.exception.PaymentDeclinedException;
 import org.evchargingplatform.payments.domain.exception.PaymentMethodRequiredException;
 import org.evchargingplatform.payments.domain.exception.PaymentNotFoundException;
@@ -158,6 +159,11 @@ public class ApiExceptionHandler {
     @ExceptionHandler(PaymentNotFoundException.class)
     ProblemDetail handlePaymentNotFound(PaymentNotFoundException exception) {
         return problem(HttpStatus.NOT_FOUND, "Payment not found", exception.getMessage());
+    }
+
+    @ExceptionHandler(NotificationNotFoundException.class)
+    ProblemDetail handleNotificationNotFound(NotificationNotFoundException exception) {
+        return problem(HttpStatus.NOT_FOUND, "Notification not found", exception.getMessage());
     }
 
     // --- Security ---
